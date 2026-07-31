@@ -85,9 +85,18 @@ Files land in a per-submission folder with one directory per configured area:
 ```text
 uploads/<student_id>_<name>_<code>/
   report/<stored-file>
-  ampl_code/<stored-file>
+  ampl_code/<submitted-zip>
+  ampl_code/<file>.mod
+  ampl_code/<file>.dat
+  ampl_code/<file>.run
+  ampl_code/other/<other-files>
   metadata/<area>_<stored-file>.json
 ```
+
+For an AMPL ZIP submission, the original ZIP is retained. Its `.mod`, `.dat`,
+and `.run` files are also extracted into `ampl_code/`; all other archive files
+are extracted into `ampl_code/other/`. Archive directory names are not trusted,
+and duplicate filenames receive a numeric suffix.
 
 The metadata sidecars are kept on the same local device as the uploaded files.
 They include file size, MIME type, SHA-256 checksum, filesystem timestamps, and
@@ -96,6 +105,43 @@ core properties, paragraph/table/image/hyperlink counts, word count, macro
 presence, and the document package entry count.
 
 Nothing in `uploads/` or `instance/` should be committed to version control.
+
+## 5. AMPL analysis
+
+The admin submission page includes an AMPL analysis view. Selecting **Run all
+.run files** executes each discovered `.run` file with `amplpy`, using the
+submission's `ampl_code/` directory as its working directory. Results are
+stored locally under:
+
+```text
+uploads/<student_id>_<name>_<code>/analysis/<run-name>/
+  result.json
+  stdout.txt
+  stderr.txt
+```
+
+Install the Python dependency with `python -m pip install -r requirements.txt`.
+The worker imports `AMPL` from the `amplpy` Python library and calls
+`modules.load()`; it does not invoke an `amplpy` command. Install the required
+AMPL and solver modules in the same Python environment, activate the UUID
+license there using the AMPL modules setup, and optionally set `AMPL_PATH` for
+an existing AMPL installation. If `amplpy` is installed in a different Python
+environment from Flask, set `AMPL_PYTHON` to that interpreter, for example:
+
+```text
+AMPL_PYTHON=/opt/homebrew/anaconda3/bin/python
+```
+
+Each result includes a diagnostics section showing the interpreter, Python
+version, installed `amplpy` version/path information, module-load status,
+`AMPL_PATH`, and import/runtime errors. Set `AMPL_RUN_TIMEOUT_SECONDS` in
+`.env` to control the maximum runtime for each script. A first statistics
+object is stored with each result; additional model statistics can be added
+later without changing the upload format.
+
+Analysis runs are admin-triggered and execute sequentially. Uploaded AMPL
+scripts are untrusted input: use this feature only on a controlled local
+machine until a process or container sandbox is added.
 
 ### Dropbox
 1. Create an app at https://www.dropbox.com/developers/apps

@@ -116,3 +116,41 @@ def write_metadata(path, metadata):
         json.dumps(metadata, indent=2, ensure_ascii=True) + "\n",
         encoding="utf-8",
     )
+
+
+def extract_ampl_archive(path, destination):
+    """Extract an AMPL ZIP without allowing paths to escape destination."""
+    path = Path(path)
+    destination = Path(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+    extracted = []
+    used_names = set()
+    allowed_extensions = {".mod", ".dat", ".run"}
+
+    with zipfile.ZipFile(path) as archive:
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+
+            source_name = Path(info.filename)
+            filename = source_name.name
+            if not filename or any(part.startswith(".") for part in source_name.parts):
+                continue
+
+            folder = destination if source_name.suffix.lower() in allowed_extensions else destination / "other"
+            folder.mkdir(parents=True, exist_ok=True)
+            safe_name = filename
+            stem = Path(safe_name).stem
+            suffix = Path(safe_name).suffix
+            counter = 1
+            while (str(folder), safe_name) in used_names or (folder / safe_name).exists():
+                safe_name = f"{stem}_{counter}{suffix}"
+                counter += 1
+
+            target = folder / safe_name
+            with archive.open(info) as source, target.open("wb") as output:
+                output.write(source.read())
+            used_names.add((str(folder), safe_name))
+            extracted.append((target, info.filename))
+
+    return extracted

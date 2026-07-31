@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AMPL analysis &mdash; Submission #{{ submission.id }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<div class="page wide">
+  <a class="back-link" href="{{ url_for('admin_submission_detail', submission_id=submission.id) }}">&larr; Back to submission</a>
+  <h1>AMPL analysis</h1>
+  <p class="subtitle">Submission #{{ submission.id }} &middot; {{ submission.name }}</p>
+
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}<div class="flash">{{ messages[-1] }}</div>{% endif %}
+  {% endwith %}
+
+  <form method="POST" onsubmit="return confirm('Run all .run files for this submission?');">
+    <input type="hidden" name="run_ampl_analysis" value="1">
+    <button type="submit" class="primary analysis-button">Run all .run files</button>
+  </form>
+
+  {% for run in submission.analysis_runs %}
+  <div class="card metadata-card">
+    <div class="analysis-heading">
+      <h2>{{ run.run_filename }}</h2>
+      <span class="badge {% if run.status != 'completed' %}warn{% endif %}">{{ run.status }}</span>
+    </div>
+    <form method="POST" action="{{ url_for('admin_delete_analysis_run', submission_id=submission.id, run_id=run.id) }}" onsubmit="return confirm('Delete this analysis run and its stored output? This cannot be undone.');">
+      <button type="submit" class="danger analysis-delete">Delete run</button>
+    </form>
+    {% if run.duration_seconds is not none %}<p>Runtime: {{ run.duration_seconds }} seconds</p>{% endif %}
+    {% if run.error %}<div class="error-box">{{ run.error }}</div>{% endif %}
+    {% if run.statistics.diagnostics %}
+      <h3>Diagnostics</h3>
+      <pre>{{ run.statistics.diagnostics | tojson(indent=2) }}</pre>
+    {% endif %}
+    {% if run.statistics %}
+      <h3>Statistics</h3>
+      <pre>{{ run.statistics | tojson(indent=2) }}</pre>
+    {% endif %}
+    <h3>Output</h3>
+    <pre>{{ run.stdout or '(no output)' }}</pre>
+    {% if run.stderr %}<h3>Errors</h3><pre>{{ run.stderr }}</pre>{% endif %}
+  </div>
+  {% else %}
+  <div class="card">No analysis runs have been recorded yet.</div>
+  {% endfor %}
+</div>
+</body>
+</html>

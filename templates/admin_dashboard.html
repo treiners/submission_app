@@ -50,7 +50,11 @@
           {% endif %}
         </td>
         <td>{{ s.ip_address }}</td>
-        <td><a href="{{ url_for('admin_submission_detail', submission_id=s.id) }}">View</a></td>
+        <td>
+          <a href="{{ url_for('admin_submission_detail', submission_id=s.id) }}">View</a>
+          &middot;
+          <a href="{{ url_for('admin_submission_metadata', submission_id=s.id) }}">Metadata</a>
+        </td>
       </tr>
       {% else %}
       <tr><td colspan="8" style="color:var(--ink-soft);">No submissions found.</td></tr>

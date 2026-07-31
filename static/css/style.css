@@ -175,6 +175,20 @@ button.primary {
 button.primary:hover { background: var(--accent-dark); }
 button.primary:disabled { background: var(--line); color: var(--ink-soft); cursor: not-allowed; }
 
+button.danger {
+  padding: 9px 13px;
+  margin-bottom: 20px;
+  background: var(--bad);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button.danger:hover { background: #8f1d17; }
+
 .error-box {
   background: var(--bad-bg);
   border: 1px solid #f3c4c0;
@@ -310,4 +324,22 @@ table.admin-table a { color: var(--accent); text-decoration: none; font-weight: 
   padding: 10px 14px;
   font-size: 0.85rem;
   margin-bottom: 16px;
+}
+
+.metadata-card { margin-top: 20px; }
+.metadata-card h2 { font-size: 1rem; margin: 0 0 12px; }
+.metadata-card h3 { font-size: 0.8rem; margin: 18px 0 8px; text-transform: uppercase; color: var(--ink-soft); }
+.analysis-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.analysis-button { margin: 8px 0 20px; }
+.analysis-delete { margin: 0 0 8px; }
+.metadata-card pre {
+  margin: 0;
+  padding: 14px;
+  overflow-x: auto;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: 0.78rem/1.5 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }

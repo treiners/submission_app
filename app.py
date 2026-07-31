@@ -1,7 +1,10 @@
 import json
 import os
 import random
+import shutil
 import string
+import subprocess
+import sys
 import tempfile
 from functools import wraps
 from pathlib import Path
@@ -13,10 +16,7 @@ from flask import (
 )
 from werkzeug.utils import secure_filename
 
-import db
-import storage
-import email_util
-import metadata
+from src import db, storage, email_util, metadata
 
 load_dotenv()
 
@@ -26,6 +26,8 @@ app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # hard ceiling, per-field 
 
 with open(Path(__file__).parent / "config.json") as f:
     SUBMISSION_CONFIG = json.load(f)
+
+db.init_db()
 
 AREAS_BY_KEY = {a["key"]: a for a in SUBMISSION_CONFIG["areas"]}
 
@@ -196,6 +198,46 @@ def api_submit():
                 )
                 saved_filenames.append(f.filename)
 
+                if area_key == "ampl_code" and tmp_path.suffix.lower() == ".zip":
+                    extract_root = Path(tmpdir) / "ampl_extracted"
+                    try:
+                        extracted_files = metadata.extract_ampl_archive(tmp_path, extract_root)
+                    except (metadata.zipfile.BadZipFile, OSError) as error:
+                        app.logger.warning("AMPL archive extraction failed for submission %s: %s", submission_id, error)
+                        extracted_files = []
+
+                    for extracted_path, archive_name in extracted_files:
+                        relative_path = extracted_path.relative_to(extract_root)
+                        extracted_folder = f"{area_folder}/{relative_path.parent.as_posix()}"
+                        extracted_name = extracted_path.name
+                        try:
+                            extracted_result = primary_backend.upload_file(
+                                extracted_path, extracted_folder, extracted_name
+                            )
+                        except storage.StorageError:
+                            extracted_result = fallback_backend.upload_file(
+                                extracted_path, extracted_folder, extracted_name
+                            )
+                            used_fallback = True
+
+                        extracted_metadata = metadata.extract_file_metadata(
+                            extracted_path, archive_name, area_key
+                        )
+                        extracted_metadata["extracted_from"] = f.filename
+                        extracted_metadata_path = (
+                            Path(STORAGE_ENV["LOCAL_UPLOAD_ROOT"])
+                            / dest_folder
+                            / "metadata"
+                            / f"{area_key}_{relative_path.as_posix().replace('/', '_')}.json"
+                        )
+                        metadata.write_metadata(extracted_metadata_path, extracted_metadata)
+                        db.add_submission_file(
+                            submission_id=submission_id, area_key=area_key, area_label=area["label"],
+                            original_filename=archive_name, stored_filename=extracted_name,
+                            storage_location=extracted_result["location"],
+                            size_bytes=extracted_path.stat().st_size,
+                        )
+
     for area in declared_areas:
         db.add_declaration(submission_id, area["key"], area["label"])
 
@@ -283,6 +325,154 @@ def admin_submission_detail(submission_id):
     if not submission:
         abort(404)
     return render_template("admin_detail.html", submission=submission)
+
+
+@app.route("/admin/submission/<int:submission_id>/analysis", methods=["GET", "POST"])
+@login_required
+def admin_submission_analysis(submission_id):
+    submission = db.get_submission(submission_id)
+    if not submission:
+        abort(404)
+
+    if request.method == "POST":
+        run_files = []
+        seen_paths = set()
+        for file in submission["files"]:
+            path = Path(file["storage_location"])
+            if path.suffix.lower() == ".run" and not path.name.startswith(".") and path.exists():
+                resolved = path.resolve()
+                if resolved not in seen_paths:
+                    run_files.append(resolved)
+                    seen_paths.add(resolved)
+
+        if not run_files:
+            flash("No runnable .run files were found in this submission.")
+            return redirect(url_for("admin_submission_analysis", submission_id=submission_id))
+
+        timeout_seconds = int(os.environ.get("AMPL_RUN_TIMEOUT_SECONDS", "120"))
+        runner = Path(__file__).parent / "analysis_runner.py"
+        ampl_python = os.environ.get("AMPL_PYTHON", sys.executable)
+        submission_root = run_files[0].parents[1]
+        result_root = submission_root / "analysis"
+        for run_path in run_files:
+            result_directory = result_root / secure_filename(run_path.stem)
+            result_directory.mkdir(parents=True, exist_ok=True)
+            run_id = db.create_analysis_run(
+                submission_id, run_path.name, str(result_directory)
+            )
+            result = {}
+            try:
+                completed = subprocess.run(
+                    [ampl_python, str(runner), str(run_path), str(run_path.parent), str(result_directory)],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_seconds,
+                    check=False,
+                )
+                try:
+                    result = json.loads(completed.stdout.strip().splitlines()[-1])
+                except (json.JSONDecodeError, IndexError):
+                    result = {
+                        "stderr": completed.stderr,
+                        "error": "The AMPL worker returned an invalid result.",
+                        "statistics": {},
+                    }
+                status = "completed" if result.get("status") == "completed" else "failed"
+            except subprocess.TimeoutExpired as error:
+                timeout_stdout = error.stdout or ""
+                timeout_stderr = error.stderr or ""
+                if isinstance(timeout_stdout, bytes):
+                    timeout_stdout = timeout_stdout.decode(errors="replace")
+                if isinstance(timeout_stderr, bytes):
+                    timeout_stderr = timeout_stderr.decode(errors="replace")
+                result = {
+                    "error": f"AMPL execution exceeded the {timeout_seconds}-second timeout.",
+                    "stdout": timeout_stdout,
+                    "stderr": timeout_stderr,
+                    "statistics": {},
+                }
+                status = "timed_out"
+            except OSError as error:
+                result = {
+                    "error": f"Could not start AMPL Python interpreter '{ampl_python}'.",
+                    "stderr": str(error),
+                    "statistics": {},
+                    "diagnostics": {"python_executable": ampl_python},
+                }
+                status = "failed"
+            db.update_analysis_run(run_id, status, result)
+
+        flash(f"AMPL analysis completed for {len(run_files)} run file(s).")
+        return redirect(url_for("admin_submission_analysis", submission_id=submission_id))
+
+    return render_template("admin_analysis.html", submission=submission)
+
+
+@app.route("/admin/submission/<int:submission_id>/analysis/<int:run_id>/delete", methods=["POST"])
+@login_required
+def admin_delete_analysis_run(submission_id, run_id):
+    submission = db.get_submission(submission_id)
+    if not submission:
+        abort(404)
+
+    run = next((item for item in submission["analysis_runs"] if item["id"] == run_id), None)
+    if not run:
+        abort(404)
+
+    result_location = Path(run["result_location"]).resolve()
+    submission_root = Path(STORAGE_ENV["LOCAL_UPLOAD_ROOT"]).resolve()
+    db.delete_analysis_run(run_id, submission_id)
+    if submission_root in result_location.parents:
+        shutil.rmtree(result_location)
+
+    flash(f"Analysis run '{run['run_filename']}' was deleted.")
+    return redirect(url_for("admin_submission_analysis", submission_id=submission_id))
+
+
+@app.route("/admin/submission/<int:submission_id>/metadata")
+@login_required
+def admin_submission_metadata(submission_id):
+    submission = db.get_submission(submission_id)
+    if not submission:
+        abort(404)
+
+    metadata_entries = []
+    local_files = [Path(file["storage_location"]) for file in submission["files"]]
+    if local_files:
+        metadata_folder = local_files[0].parents[1] / "metadata"
+        for metadata_path in sorted(metadata_folder.glob("*.json")):
+            try:
+                data = json.loads(metadata_path.read_text(encoding="utf-8"))
+                metadata_entries.append({
+                    "filename": data.get("original_filename", metadata_path.name),
+                    "data": data,
+                })
+            except (OSError, json.JSONDecodeError):
+                continue
+
+    return render_template(
+        "admin_metadata.html", submission=submission, metadata_entries=metadata_entries
+    )
+
+
+@app.route("/admin/submission/<int:submission_id>/delete", methods=["POST"])
+@login_required
+def admin_delete_submission(submission_id):
+    submission = db.get_submission(submission_id)
+    if not submission:
+        abort(404)
+
+    local_files = [Path(file["storage_location"]) for file in submission["files"]]
+    db.delete_submission(submission_id)
+
+    if local_files:
+        upload_root = Path(STORAGE_ENV["LOCAL_UPLOAD_ROOT"]).resolve()
+        submission_folder = local_files[0].resolve().parents[1]
+        if upload_root in submission_folder.parents:
+            shutil.rmtree(submission_folder)
+
+    flash(f"Submission #{submission_id} was deleted.")
+    return redirect(url_for("admin_dashboard"))
 
 
 @app.route("/admin/download/<int:file_id>")

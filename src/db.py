@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from datetime import datetime, timezone
 
@@ -34,6 +35,21 @@ CREATE TABLE IF NOT EXISTS submission_declarations (
     submission_id INTEGER NOT NULL REFERENCES submissions(id),
     area_key TEXT NOT NULL,
     area_label TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS analysis_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    submission_id INTEGER NOT NULL REFERENCES submissions(id),
+    run_filename TEXT NOT NULL,
+    status TEXT NOT NULL,
+    started_at TEXT,
+    completed_at TEXT,
+    duration_seconds REAL,
+    result_location TEXT,
+    stdout TEXT,
+    stderr TEXT,
+    error TEXT,
+    statistics_json TEXT NOT NULL DEFAULT '{}'
 );
 
 CREATE INDEX IF NOT EXISTS idx_submissions_student_id ON submissions(student_id);
@@ -144,12 +160,23 @@ def get_submission(submission_id):
     declarations = conn.execute(
         "SELECT * FROM submission_declarations WHERE submission_id = ?", (submission_id,)
     ).fetchall()
+    analysis_runs = conn.execute(
+        "SELECT * FROM analysis_runs WHERE submission_id = ? ORDER BY id DESC", (submission_id,)
+    ).fetchall()
     conn.close()
     if submission is None:
         return None
     result = dict(submission)
     result["files"] = [dict(f) for f in files]
     result["declarations"] = [dict(d) for d in declarations]
+    result["analysis_runs"] = []
+    for run in analysis_runs:
+        run = dict(run)
+        try:
+            run["statistics"] = json.loads(run.pop("statistics_json"))
+        except (TypeError, json.JSONDecodeError):
+            run["statistics"] = {}
+        result["analysis_runs"].append(run)
     return result
 
 
@@ -160,3 +187,62 @@ def get_submission_by_code(code):
     ).fetchone()
     conn.close()
     return dict(submission) if submission else None
+
+
+def delete_submission(submission_id):
+    conn = get_connection()
+    conn.execute("DELETE FROM analysis_runs WHERE submission_id = ?", (submission_id,))
+    conn.execute("DELETE FROM submission_files WHERE submission_id = ?", (submission_id,))
+    conn.execute("DELETE FROM submission_declarations WHERE submission_id = ?", (submission_id,))
+    conn.execute("DELETE FROM submissions WHERE id = ?", (submission_id,))
+    conn.commit()
+    conn.close()
+
+
+def create_analysis_run(submission_id, run_filename, result_location):
+    conn = get_connection()
+    cursor = conn.execute(
+        """INSERT INTO analysis_runs
+           (submission_id, run_filename, status, started_at, result_location)
+           VALUES (?, ?, 'running', ?, ?)""",
+        (submission_id, run_filename, datetime.now(timezone.utc).isoformat(), result_location),
+    )
+    run_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return run_id
+
+
+def update_analysis_run(run_id, status, result, completed=True):
+    conn = get_connection()
+    conn.execute(
+        """UPDATE analysis_runs
+           SET status = ?, completed_at = ?, duration_seconds = ?, stdout = ?,
+               stderr = ?, error = ?, statistics_json = ?
+           WHERE id = ?""",
+        (
+            status,
+            datetime.now(timezone.utc).isoformat() if completed else None,
+            result.get("duration_seconds"),
+            result.get("stdout", ""),
+            result.get("stderr", ""),
+            result.get("error"),
+            json.dumps({
+                **result.get("statistics", {}),
+                "diagnostics": result.get("diagnostics", {}),
+            }),
+            run_id,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_analysis_run(run_id, submission_id):
+    conn = get_connection()
+    conn.execute(
+        "DELETE FROM analysis_runs WHERE id = ? AND submission_id = ?",
+        (run_id, submission_id),
+    )
+    conn.commit()
+    conn.close()
