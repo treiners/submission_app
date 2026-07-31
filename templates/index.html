@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ assignment_title }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<div class="page">
+  <h1>{{ assignment_title }}</h1>
+  <p class="subtitle">Enter your details and attach your files below. Files can be dragged in or chosen manually.</p>
+
+  <div class="card" id="form-card">
+    <div id="error-box" class="error-box" style="display:none;"></div>
+
+    <form id="submit-form" novalidate>
+      <div class="field">
+        <label for="name">Full name</label>
+        <input type="text" id="name" name="name" autocomplete="name" required>
+      </div>
+
+      <div class="field">
+        <label for="student_id">Student ID</label>
+        <input type="text" id="student_id" name="student_id" autocomplete="off" required>
+      </div>
+
+      <div class="field">
+        <label for="email">Email (for confirmation)</label>
+        <input type="email" id="email" name="email" autocomplete="email" required>
+      </div>
+
+      {% for area in areas %}
+      <div class="field">
+        <label>{{ area.label }}</label>
+        <div class="dropzone" data-area="{{ area.key }}">
+          <div class="dz-label">Drag file here, or click to choose</div>
+          <div class="dz-hint">
+            Allowed: {{ area.allowed_extensions | join(', ') }}
+            &middot; Max {{ area.max_size_mb }}MB
+            &middot; {{ area.max_files }} file{{ 's' if area.max_files > 1 else '' }} max
+          </div>
+          <input type="file"
+                 name="{{ area.key }}"
+                 data-area="{{ area.key }}"
+                 accept="{{ area.allowed_extensions | join(',') }}"
+                 {% if area.max_files > 1 %}multiple{% endif %}>
+        </div>
+        <div class="file-list" data-area-list="{{ area.key }}"></div>
+        <label class="declare-row">
+          <input type="checkbox" class="declare-checkbox" data-declare="{{ area.key }}">
+          I declare that I did not upload this file
+        </label>
+      </div>
+      {% endfor %}
+
+      <div class="progress-track" id="progress-track">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+
+      <button type="submit" class="primary" id="submit-btn" style="margin-top:8px;">Submit</button>
+    </form>
+  </div>
+
+  <div class="card result-card" id="result-card" style="display:none;">
+    <div class="dz-label" style="font-size:1rem;">Submission received</div>
+    <div class="result-code" id="result-code"></div>
+    <div class="result-meta" id="result-meta"></div>
+  </div>
+</div>
+
+<script>
+  window.SUBMISSION_AREAS = {{ areas | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

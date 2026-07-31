@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Submissions &mdash; Admin</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<div class="page wide">
+  <div class="topbar">
+    <div>
+      <h1 style="margin-bottom:0;">{{ assignment_title }}</h1>
+      <p class="subtitle" style="margin-bottom:0;">{{ submissions | length }} submission(s)</p>
+    </div>
+    <a class="logout" href="{{ url_for('admin_logout') }}">Log out</a>
+  </div>
+
+  <form class="search-bar" method="GET">
+    <input type="text" name="q" placeholder="Search by name, student ID, or code" value="{{ search }}">
+    <button type="submit" class="primary" style="width:auto; padding:10px 20px;">Search</button>
+  </form>
+
+  <table class="admin-table">
+    <thead>
+      <tr>
+        <th>Submitted</th>
+        <th>Name</th>
+        <th>Student ID</th>
+        <th>Code</th>
+        <th>Storage</th>
+        <th>Email</th>
+        <th>IP</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in submissions %}
+      <tr>
+        <td>{{ s.submitted_at[:19].replace('T', ' ') }}</td>
+        <td>{{ s.name }}</td>
+        <td>{{ s.student_id }}</td>
+        <td style="font-family: var(--mono);">{{ s.code }}</td>
+        <td>{{ s.storage_backend }}</td>
+        <td>
+          {% if s.email_sent %}
+            <span class="badge">sent</span>
+          {% else %}
+            <span class="badge warn">not sent</span>
+          {% endif %}
+        </td>
+        <td>{{ s.ip_address }}</td>
+        <td><a href="{{ url_for('admin_submission_detail', submission_id=s.id) }}">View</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" style="color:var(--ink-soft);">No submissions found.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+</body>
+</html>

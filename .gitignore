@@ -1,0 +1,17 @@
+.env
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+
+# Submission data and local runtime state
+instance/*.db
+instance/*.db-*
+uploads/*
+!uploads/.gitkeep
+
+# Local tooling
+.pytest_cache/
+.mypy_cache/
+.coverage

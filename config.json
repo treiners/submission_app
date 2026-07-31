@@ -1,0 +1,19 @@
+{
+  "assignment_title": "Assignment Submission",
+  "areas": [
+    {
+      "key": "report",
+      "label": "Report",
+      "allowed_extensions": [".docx", ".pdf"],
+      "max_size_mb": 10,
+      "max_files": 1
+    },
+    {
+      "key": "ampl_code",
+      "label": "AMPL Code",
+      "allowed_extensions": [".zip"],
+      "max_size_mb": 10,
+      "max_files": 1
+    }
+  ]
+}

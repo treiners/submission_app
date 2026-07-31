@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Submission #{{ submission.id }} &mdash; Admin</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<div class="page">
+  <a class="back-link" href="{{ url_for('admin_dashboard') }}">&larr; Back to all submissions</a>
+  <h1>Submission #{{ submission.id }}</h1>
+
+  <div class="card">
+    <dl class="kv-list">
+      <dt>Name</dt><dd>{{ submission.name }}</dd>
+      <dt>Student ID</dt><dd>{{ submission.student_id }}</dd>
+      <dt>Confirmation code</dt><dd style="font-family: var(--mono);">{{ submission.code }}</dd>
+      <dt>Submitted at</dt><dd>{{ submission.submitted_at }}</dd>
+      <dt>IP address</dt><dd>{{ submission.ip_address }}</dd>
+      <dt>User agent</dt><dd style="font-size:0.8rem; color:var(--ink-soft);">{{ submission.user_agent }}</dd>
+      <dt>Email</dt><dd>{{ submission.email }} &mdash;
+        {% if submission.email_sent %}<span class="badge">sent</span>{% else %}<span class="badge warn">not sent</span>{% endif %}
+      </dd>
+      <dt>Storage backend</dt><dd>{{ submission.storage_backend }}
+        {% if submission.storage_note %}<br><span style="font-size:0.8rem;color:var(--ink-soft);">{{ submission.storage_note }}</span>{% endif %}
+      </dd>
+    </dl>
+
+    <dt style="font-size:0.75rem;color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.03em;">Files</dt>
+    {% for f in submission.files %}
+      <div class="file-chip" style="margin-top:10px;">
+        <span>[{{ f.area_label }}] {{ f.original_filename }} &middot; {{ (f.size_bytes / 1024) | round(1) }} KB</span>
+        {% if submission.storage_backend == 'local' %}
+          <a href="{{ url_for('admin_download_file', file_id=f.id) }}" style="color:var(--accent); font-size:0.82rem; font-weight:600;">Download</a>
+        {% else %}
+          <span style="font-size:0.78rem; color:var(--ink-soft);">{{ f.storage_location }}</span>
+        {% endif %}
+      </div>
+    {% endfor %}
+    {% for d in submission.declarations %}
+      <div class="file-chip" style="margin-top:10px;">
+        <span>[{{ d.area_label }}] Declared as not submitted</span>
+        <span class="badge warn">not submitted</span>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+</body>
+</html>
