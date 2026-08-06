@@ -33,6 +33,9 @@
       {% for area in areas %}
       <div class="field">
         <label>{{ area.label }}</label>
+        {% if area.instruction %}
+        <div class="hint" style="margin-bottom:8px;">{{ area.instruction }}</div>
+        {% endif %}
         <div class="dropzone" data-area="{{ area.key }}">
           <div class="dz-label">Drag file here, or click to choose</div>
           <div class="dz-hint">
@@ -67,6 +70,36 @@
     <div class="result-code" id="result-code"></div>
     <div class="result-meta" id="result-meta"></div>
   </div>
+
+  <div class="card lookup-card" id="lookup-card">
+    <h2>Check Your Submitted Files</h2>
+    <p class="subtitle" style="margin-bottom:16px;">
+      Enter your 6-letter confirmation code to view the files recorded for your submission.
+    </p>
+
+    <form id="lookup-form" novalidate>
+      <div class="lookup-row">
+        <input type="text" id="lookup-code" maxlength="6" autocomplete="off" placeholder="e.g. ABXQTR" aria-label="Confirmation code">
+        <button type="submit" class="primary lookup-btn">Check Files</button>
+      </div>
+    </form>
+
+    <div id="lookup-error" class="error-box" style="display:none; margin-top:12px;"></div>
+
+    <div id="lookup-result" class="lookup-result" style="display:none;">
+      <div class="lookup-meta" id="lookup-meta"></div>
+      <h3>Submitted files</h3>
+      <ul id="lookup-files" class="lookup-files"></ul>
+      <div id="lookup-declared-wrap" style="display:none;">
+        <h3>Declared not submitted</h3>
+        <ul id="lookup-declared" class="lookup-files"></ul>
+      </div>
+    </div>
+  </div>
+
+  {% if form_version %}
+  <p class="form-version">Form version {{ form_version }}</p>
+  {% endif %}
 </div>
 
 <script>

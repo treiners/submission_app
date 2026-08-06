@@ -1,9 +1,13 @@
 {
-  "assignment_title": "Assignment Submission",
+  "assignment_title": "MATH5007 Assignment Submission A1P1",
+  "form_version": "0.6.0",
+  "marking_template_docx": "making_template/marking_template_MATH5007_A1P1_2026_S2.docx",
+  "marking_extraction_areas": ["report"],
   "areas": [
     {
       "key": "report",
       "label": "Report",
+      "instruction": "Upload your report as a PDF or DOCX file. This is just a single file, so please ensure it is in the correct format.",
       "allowed_extensions": [".docx", ".pdf"],
       "max_size_mb": 10,
       "max_files": 1
@@ -11,6 +15,7 @@
     {
       "key": "ampl_code",
       "label": "AMPL Code",
+      "instruction": "Upload a single ZIP containing your AMPL .mod/.dat/.run files. If you have multiple models, please include them all in the ZIP. Ensure that your main model file is named 'model.mod' and your data file is named 'data.dat'.",
       "allowed_extensions": [".zip"],
       "max_size_mb": 10,
       "max_files": 1

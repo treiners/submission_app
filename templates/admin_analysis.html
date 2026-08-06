@@ -10,7 +10,10 @@
 <div class="page wide">
   <a class="back-link" href="{{ url_for('admin_submission_detail', submission_id=submission.id) }}">&larr; Back to submission</a>
   <h1>AMPL analysis</h1>
-  <p class="subtitle">Submission #{{ submission.id }} &middot; {{ submission.name }}</p>
+  <p class="subtitle">
+    Submission #{{ submission.id }} &middot; {{ submission.name }}
+    {% if form_version %}&middot; Form version {{ form_version }}{% endif %}
+  </p>
 
   {% with messages = get_flashed_messages() %}
     {% if messages %}<div class="flash">{{ messages[-1] }}</div>{% endif %}

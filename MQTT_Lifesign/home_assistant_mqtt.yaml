@@ -1,0 +1,21 @@
+mqtt:
+  binary_sensor:
+    - name: "Windows 10 PC Alive"
+      unique_id: windows10_pc_alive
+      state_topic: "home/windows10_pc/lifesign/state"
+      payload_on: "1"
+      payload_off: "0"
+      device_class: connectivity
+
+  sensor:
+    - name: "Windows 10 CPU"
+      unique_id: windows10_pc_cpu
+      state_topic: "home/windows10_pc/metrics"
+      unit_of_measurement: "%"
+      value_template: "{{ value_json.cpu_percent }}"
+
+    - name: "Windows 10 RAM"
+      unique_id: windows10_pc_ram
+      state_topic: "home/windows10_pc/metrics"
+      unit_of_measurement: "%"
+      value_template: "{{ value_json.memory_percent }}"

@@ -1,8 +1,11 @@
 import json
 import sqlite3
 from datetime import datetime, timezone
+from pathlib import Path
 
-DB_PATH = "instance/submissions.db"
+BASE_DIR = Path(__file__).resolve().parent.parent
+INSTANCE_DIR = BASE_DIR / "instance"
+DB_PATH = INSTANCE_DIR / "submissions.db"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS submissions (
@@ -52,12 +55,24 @@ CREATE TABLE IF NOT EXISTS analysis_runs (
     statistics_json TEXT NOT NULL DEFAULT '{}'
 );
 
+CREATE TABLE IF NOT EXISTS marking_assessments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    submission_id INTEGER NOT NULL REFERENCES submissions(id),
+    question_id TEXT NOT NULL,
+    score TEXT,
+    comment TEXT,
+    updated_at TEXT NOT NULL,
+    UNIQUE(submission_id, question_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_submissions_student_id ON submissions(student_id);
 CREATE INDEX IF NOT EXISTS idx_submissions_code ON submissions(code);
+CREATE INDEX IF NOT EXISTS idx_marking_assessments_submission ON marking_assessments(submission_id);
 """
 
 
 def get_connection():
+    INSTANCE_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON;")
@@ -189,8 +204,43 @@ def get_submission_by_code(code):
     return dict(submission) if submission else None
 
 
+def get_submission_preview_by_code(code):
+    conn = get_connection()
+    submission = conn.execute(
+        "SELECT id, code, submitted_at FROM submissions WHERE code = ?",
+        (code.upper(),),
+    ).fetchone()
+    if submission is None:
+        conn.close()
+        return None
+
+    files = conn.execute(
+        """SELECT area_key, area_label, original_filename
+           FROM submission_files
+           WHERE submission_id = ?
+           ORDER BY area_label, id""",
+        (submission["id"],),
+    ).fetchall()
+    declarations = conn.execute(
+        """SELECT area_key, area_label
+           FROM submission_declarations
+           WHERE submission_id = ?
+           ORDER BY area_label, id""",
+        (submission["id"],),
+    ).fetchall()
+    conn.close()
+
+    return {
+        "code": submission["code"],
+        "submitted_at": submission["submitted_at"],
+        "files": [dict(row) for row in files],
+        "declarations": [dict(row) for row in declarations],
+    }
+
+
 def delete_submission(submission_id):
     conn = get_connection()
+    conn.execute("DELETE FROM marking_assessments WHERE submission_id = ?", (submission_id,))
     conn.execute("DELETE FROM analysis_runs WHERE submission_id = ?", (submission_id,))
     conn.execute("DELETE FROM submission_files WHERE submission_id = ?", (submission_id,))
     conn.execute("DELETE FROM submission_declarations WHERE submission_id = ?", (submission_id,))
@@ -246,3 +296,50 @@ def delete_analysis_run(run_id, submission_id):
     )
     conn.commit()
     conn.close()
+
+
+def save_marking_assessment(submission_id, question_id, score, comment):
+    conn = get_connection()
+    conn.execute(
+        """INSERT INTO marking_assessments
+           (submission_id, question_id, score, comment, updated_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(submission_id, question_id)
+           DO UPDATE SET
+             score = excluded.score,
+             comment = excluded.comment,
+             updated_at = excluded.updated_at""",
+        (
+            submission_id,
+            question_id,
+            score,
+            comment,
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_marking_assessments(submission_id):
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT question_id, score, comment, updated_at FROM marking_assessments WHERE submission_id = ?",
+        (submission_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+def has_marking_assessments(submission_id):
+    conn = get_connection()
+    row = conn.execute(
+        """SELECT 1
+           FROM marking_assessments
+           WHERE submission_id = ?
+             AND (TRIM(COALESCE(score, '')) != '' OR TRIM(COALESCE(comment, '')) != '')
+           LIMIT 1""",
+        (submission_id,),
+    ).fetchone()
+    conn.close()
+    return row is not None

@@ -10,7 +10,9 @@
 <div class="page">
   <a class="back-link" href="{{ url_for('admin_dashboard') }}">&larr; Back to all submissions</a>
   <h1>Submission #{{ submission.id }}</h1>
+  {% if form_version %}<p class="subtitle" style="margin-bottom:12px;">Form version {{ form_version }}</p>{% endif %}
   <p><a class="back-link" href="{{ url_for('admin_submission_metadata', submission_id=submission.id) }}">View file metadata</a></p>
+  <p><a class="back-link" href="{{ url_for('admin_submission_marking', submission_id=submission.id) }}">View marking preview</a></p>
   <p><a class="back-link" href="{{ url_for('admin_submission_analysis', submission_id=submission.id) }}">View AMPL analysis</a></p>
   <form method="POST" action="{{ url_for('admin_delete_submission', submission_id=submission.id) }}" onsubmit="return confirm('Delete this submission and all stored files? This cannot be undone.');">
     <button type="submit" class="danger">Delete submission</button>

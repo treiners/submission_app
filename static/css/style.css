@@ -239,6 +239,84 @@ button.danger:hover { background: #8f1d17; }
   font-size: 0.85rem;
 }
 
+.lookup-card {
+  margin-top: 20px;
+}
+
+.form-version {
+  margin: 14px 0 0;
+  text-align: center;
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+}
+
+.lookup-card h2 {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+}
+
+.lookup-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.lookup-row input {
+  flex: 1 1 260px;
+  min-width: 180px;
+  text-transform: uppercase;
+  font-family: var(--mono);
+  letter-spacing: 0.08em;
+}
+
+button.lookup-btn {
+  width: 170px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.lookup-result {
+  margin-top: 14px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.lookup-meta {
+  color: var(--ink-soft);
+  font-size: 0.83rem;
+}
+
+.lookup-result h3 {
+  margin: 14px 0 6px;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--ink-soft);
+}
+
+.lookup-files {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.9rem;
+}
+
+.lookup-files li {
+  margin: 4px 0;
+}
+
+@media (max-width: 640px) {
+  .lookup-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  button.lookup-btn {
+    width: 100%;
+  }
+}
+
 .badge {
   display: inline-block;
   font-size: 0.72rem;
@@ -342,4 +420,273 @@ table.admin-table a { color: var(--accent); text-decoration: none; font-weight: 
   font: 0.78rem/1.5 var(--mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.marking-images {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.marking-image-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  padding: 10px;
+}
+
+.marking-image-meta {
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  margin-bottom: 8px;
+  overflow-wrap: anywhere;
+}
+
+.marking-image-card img {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.marking-toolbar {
+  display: flex;
+  gap: 10px;
+  margin: 0 0 12px;
+}
+
+.marking-tab {
+  display: inline-block;
+  font-size: 0.82rem;
+  color: var(--accent);
+  text-decoration: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: #fff;
+}
+
+.marking-tab.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.marking-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 0 0 12px;
+}
+
+.marking-nav-link {
+  font-size: 0.82rem;
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.marking-nav-disabled {
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
+
+.question-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.question-pill {
+  font-size: 0.78rem;
+  color: var(--accent);
+  text-decoration: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: #fff;
+}
+
+.question-pill.active {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.marking-student-meta {
+  font-size: 0.86rem;
+  margin-bottom: 10px;
+  color: var(--ink-soft);
+}
+
+.inline-image-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+
+.inline-image-link {
+  background: #fff;
+  color: var(--accent);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+
+.inline-image-link:hover {
+  border-color: var(--accent);
+}
+
+.image-popup {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 999;
+}
+
+.image-popup[aria-hidden="true"] {
+  display: none;
+}
+
+.image-popup-inner {
+  width: min(1100px, 100%);
+  max-height: 90vh;
+  overflow: auto;
+  background: #fff;
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.image-popup-close {
+  display: inline-block;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.image-popup-title {
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+
+.image-popup-inner img {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.reextract-form {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 14px;
+}
+
+.reextract-btn {
+  width: auto;
+  padding: 8px 14px;
+  font-size: 0.82rem;
+}
+
+.reextract-hint {
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+
+.confidence-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.confidence-pill {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.confidence-pill.high {
+  background: rgba(28, 122, 77, 0.14);
+  color: var(--good);
+}
+
+.confidence-pill.medium {
+  background: rgba(40, 86, 163, 0.12);
+  color: var(--accent-dark);
+}
+
+.confidence-pill.low {
+  background: rgba(179, 38, 30, 0.12);
+  color: var(--bad);
+}
+
+.confidence-note {
+  font-size: 0.76rem;
+  color: var(--ink-soft);
+}
+
+.assessment-form {
+  margin: 8px 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: #fff;
+}
+
+.assessment-grid {
+  display: grid;
+  grid-template-columns: 170px 1fr;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.assessment-grid label {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+}
+
+.assessment-grid input,
+.assessment-grid textarea {
+  margin-top: 4px;
+  width: 100%;
+  font-size: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.save-marking-btn {
+  width: auto;
+  padding: 8px 12px;
+  font-size: 0.8rem;
+}
+
+@media (max-width: 700px) {
+  .reextract-form {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .assessment-grid {
+    grid-template-columns: 1fr;
+  }
 }

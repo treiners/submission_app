@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Marking preview &mdash; Submission #{{ submission.id }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<div class="page wide">
+  <a class="back-link" href="{{ url_for('admin_submission_detail', submission_id=submission.id) }}">&larr; Back to submission</a>
+  <h1>Marking preview</h1>
+  <p class="subtitle">
+    Submission #{{ submission.id }} &middot; {{ submission.name }} &middot; {{ submission.student_id }}
+    {% if form_version %}&middot; Form version {{ form_version }}{% endif %}
+  </p>
+
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}<div class="flash">{{ messages[-1] }}</div>{% endif %}
+  {% endwith %}
+
+  <form method="POST" action="{{ url_for('admin_reextract_marking_preview', submission_id=submission.id) }}" class="reextract-form">
+    <button type="submit" class="primary reextract-btn" {% if not can_reextract %}disabled{% endif %}>Re-extract marking preview</button>
+    <span class="reextract-hint">
+      {% if can_reextract %}
+      Available because no scores/comments are saved for this submission.
+      {% else %}
+      Locked: this submission already has saved scores/comments.
+      {% endif %}
+    </span>
+  </form>
+
+  <div class="marking-toolbar">
+    <a class="marking-tab {% if view_mode == 'student' %}active{% endif %}"
+       href="{{ url_for('admin_submission_marking', submission_id=submission.id, view='student') }}">Per student</a>
+    <a class="marking-tab {% if view_mode == 'question' %}active{% endif %}"
+       href="{{ url_for('admin_submission_marking', submission_id=submission.id, view='question', question=selected_question or '') }}">Per question</a>
+  </div>
+
+  {% if view_mode == 'student' %}
+  <div class="marking-nav">
+    {% if prev_submission_id %}
+      <a class="marking-nav-link" href="{{ url_for('admin_submission_marking', submission_id=prev_submission_id, view='student') }}">&larr; Previous submission</a>
+    {% else %}
+      <span class="marking-nav-disabled">&larr; Previous submission</span>
+    {% endif %}
+
+    {% if next_submission_id %}
+      <a class="marking-nav-link" href="{{ url_for('admin_submission_marking', submission_id=next_submission_id, view='student') }}">Next submission &rarr;</a>
+    {% else %}
+      <span class="marking-nav-disabled">Next submission &rarr;</span>
+    {% endif %}
+  </div>
+
+  {% for preview in previews %}
+  <div class="card metadata-card">
+    <h2>{{ preview.file }}</h2>
+    {% if preview.data.status == 'ok' %}
+      <p style="margin:0 0 10px; color:var(--ink-soft); font-size:0.85rem;">
+        {{ preview.data.answer_count }} extracted answer(s)
+        {% if preview.data.image_count %}&middot; {{ preview.data.image_count }} extracted image(s){% endif %}
+      </p>
+      {% for answer in preview.data.answers %}
+      <h3>
+        {{ answer.question_id }}
+        {% if answer.template_question_id and answer.template_question_id != answer.question_id %}
+          (template {{ answer.template_question_id }})
+        {% endif %}
+        &middot; {{ answer.prompt }}
+      </h3>
+      {% if answer.confidence %}
+      <div class="confidence-row">
+        <span class="confidence-pill {{ answer.confidence.level }}">Confidence {{ answer.confidence.level }} ({{ answer.confidence.score }})</span>
+        {% if answer.confidence.reasons %}
+          <span class="confidence-note">{{ answer.confidence.reasons | join(' ') }}</span>
+        {% endif %}
+      </div>
+      {% endif %}
+      <pre>{{ answer.answer }}</pre>
+
+      <form method="POST" action="{{ url_for('admin_save_marking_assessment', submission_id=submission.id) }}" class="assessment-form">
+        <input type="hidden" name="question_id" value="{{ answer.question_id }}">
+        <input type="hidden" name="view" value="student">
+        <div class="assessment-grid">
+          <label>Score
+            <input type="text" name="score" value="{{ assessments.get(answer.question_id, {}).get('score', '') }}" placeholder="e.g. 4/5">
+          </label>
+          <label>Comment
+            <textarea name="comment" rows="2" placeholder="Marker notes">{{ assessments.get(answer.question_id, {}).get('comment', '') }}</textarea>
+          </label>
+        </div>
+        <button type="submit" class="primary save-marking-btn">Save marking</button>
+      </form>
+
+      {% if preview.data.images %}
+      <div class="inline-image-links">
+        {% for image in preview.data.images %}
+        <button type="button"
+                class="inline-image-link"
+                data-popup-src="data:{{ image.content_type }};base64,{{ image.data_base64 }}"
+                data-popup-title="{{ image.filename }}">
+          Open image {{ loop.index }}
+        </button>
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% endfor %}
+
+      {% if preview.data.images %}
+      <h3>Extracted images</h3>
+      <div class="marking-images">
+        {% for image in preview.data.images %}
+        <div class="marking-image-card">
+          <div class="marking-image-meta">{{ image.filename }} &middot; {{ (image.size_bytes / 1024) | round(1) }} KB</div>
+          {% if image.content_type.startswith('image/') %}
+          <img src="data:{{ image.content_type }};base64,{{ image.data_base64 }}" alt="{{ image.filename }}">
+          {% else %}
+          <pre>Unsupported preview content type: {{ image.content_type }}</pre>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if preview.data.unmatched_insertions %}
+      <h3>Unmatched insertions</h3>
+      {% for unmatched in preview.data.unmatched_insertions %}
+      <pre>{{ unmatched }}</pre>
+      {% endfor %}
+      {% endif %}
+    {% else %}
+      <div class="error-box" style="margin: 0;">
+        {{ preview.data.reason or 'No extraction result is available for this file.' }}
+      </div>
+    {% endif %}
+  </div>
+  {% else %}
+  <div class="card">No marking preview output was found for this submission.</div>
+  {% endfor %}
+  {% else %}
+  <div class="card metadata-card">
+    <h2>Question view</h2>
+
+    {% if question_ids %}
+    <div class="question-bar">
+      {% for qid in question_ids %}
+      <a class="question-pill {% if qid == selected_question %}active{% endif %}"
+         href="{{ url_for('admin_submission_marking', submission_id=(question_entry.submission_id if question_entry else submission.id), view='question', question=qid) }}">{{ qid }}</a>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if question_entry %}
+    <div class="marking-nav">
+      {% if question_prev_submission_id %}
+        <a class="marking-nav-link" href="{{ url_for('admin_submission_marking', submission_id=question_prev_submission_id, view='question', question=selected_question) }}">&larr; Previous student</a>
+      {% else %}
+        <span class="marking-nav-disabled">&larr; Previous student</span>
+      {% endif %}
+
+      {% if question_next_submission_id %}
+        <a class="marking-nav-link" href="{{ url_for('admin_submission_marking', submission_id=question_next_submission_id, view='question', question=selected_question) }}">Next student &rarr;</a>
+      {% else %}
+        <span class="marking-nav-disabled">Next student &rarr;</span>
+      {% endif %}
+    </div>
+
+    <div class="marking-student-meta">
+      <strong>{{ question_entry.name }}</strong>
+      &middot; {{ question_entry.student_id }}
+      {% if question_entry.email %}&middot; {{ question_entry.email }}{% endif %}
+      &middot; Submission #{{ question_entry.submission_id }}
+    </div>
+
+    <h3>
+      {{ question_entry.answer.question_id }}
+      {% if question_entry.answer.template_question_id and question_entry.answer.template_question_id != question_entry.answer.question_id %}
+        (template {{ question_entry.answer.template_question_id }})
+      {% endif %}
+      &middot; {{ question_entry.answer.prompt }}
+    </h3>
+    {% if question_entry.answer.confidence %}
+    <div class="confidence-row">
+      <span class="confidence-pill {{ question_entry.answer.confidence.level }}">Confidence {{ question_entry.answer.confidence.level }} ({{ question_entry.answer.confidence.score }})</span>
+      {% if question_entry.answer.confidence.reasons %}
+        <span class="confidence-note">{{ question_entry.answer.confidence.reasons | join(' ') }}</span>
+      {% endif %}
+    </div>
+    {% endif %}
+    <pre>{{ question_entry.answer.answer }}</pre>
+
+    <form method="POST" action="{{ url_for('admin_save_marking_assessment', submission_id=question_entry.submission_id) }}" class="assessment-form">
+      <input type="hidden" name="question_id" value="{{ question_entry.answer.question_id }}">
+      <input type="hidden" name="view" value="question">
+      <input type="hidden" name="selected_question" value="{{ selected_question }}">
+      <div class="assessment-grid">
+        <label>Score
+          <input type="text" name="score" value="{{ question_entry.assessment.get('score', '') }}" placeholder="e.g. 4/5">
+        </label>
+        <label>Comment
+          <textarea name="comment" rows="2" placeholder="Marker notes">{{ question_entry.assessment.get('comment', '') }}</textarea>
+        </label>
+      </div>
+      <button type="submit" class="primary save-marking-btn">Save marking</button>
+    </form>
+
+    {% if question_entry.images %}
+    <div class="inline-image-links">
+      {% for image in question_entry.images %}
+      <button type="button"
+              class="inline-image-link"
+              data-popup-src="data:{{ image.content_type }};base64,{{ image.data_base64 }}"
+              data-popup-title="{{ image.filename }}">
+        Open image {{ loop.index }}
+      </button>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% else %}
+    <div class="error-box" style="margin:0;">No answer found for this question yet.</div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<div id="image-popup" class="image-popup" aria-hidden="true">
+  <div class="image-popup-inner">
+    <button type="button" class="image-popup-close" id="image-popup-close">Close</button>
+    <div class="image-popup-title" id="image-popup-title"></div>
+    <img id="image-popup-img" src="" alt="Expanded extracted image">
+  </div>
+</div>
+
+<script>
+(() => {
+  const popup = document.getElementById('image-popup');
+  const popupImg = document.getElementById('image-popup-img');
+  const popupTitle = document.getElementById('image-popup-title');
+  const closeBtn = document.getElementById('image-popup-close');
+  const launchers = document.querySelectorAll('.inline-image-link');
+
+  function closePopup() {
+    popup.setAttribute('aria-hidden', 'true');
+    popupImg.removeAttribute('src');
+    popupTitle.textContent = '';
+  }
+
+  launchers.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      popupImg.src = btn.getAttribute('data-popup-src') || '';
+      popupTitle.textContent = btn.getAttribute('data-popup-title') || '';
+      popup.setAttribute('aria-hidden', 'false');
+    });
+  });
+
+  closeBtn.addEventListener('click', closePopup);
+  popup.addEventListener('click', (event) => {
+    if (event.target === popup) {
+      closePopup();
+    }
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && popup.getAttribute('aria-hidden') === 'false') {
+      closePopup();
+    }
+  });
+})();
+</script>
+</body>
+</html>

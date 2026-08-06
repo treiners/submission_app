@@ -1,7 +1,7 @@
 # Assignment Submission System
 
 A small web app for students to submit files (report + AMPL code, or whatever
-you configure) with name/student ID, get a confirmation email + 4-character
+you configure) with name/student ID, get a confirmation email + 6-letter
 code, and give you an admin page to browse submissions.
 
 ## What's included
@@ -45,10 +45,15 @@ Edit `config.json` — no code changes needed:
 ```json
 {
   "assignment_title": "Assignment 1 Submission",
+  "form_version": "0.6.0",
+  "marking_template_docx": "making_template/marking_template_MATH5007_A1P1_2026_S2.docx",
+  "marking_extraction_areas": ["report"],
+  "marking_preview_max_images": 12,
   "areas": [
     {
       "key": "report",
       "label": "Report",
+      "instruction": "Upload your report as a PDF or DOCX file.",
       "allowed_extensions": [".docx", ".pdf"],
       "max_size_mb": 10,
       "max_files": 1
@@ -56,6 +61,7 @@ Edit `config.json` — no code changes needed:
     {
       "key": "ampl_code",
       "label": "AMPL Code",
+      "instruction": "Upload a single ZIP containing your AMPL .mod/.dat/.run files.",
       "allowed_extensions": [".zip"],
       "max_size_mb": 10,
       "max_files": 1
@@ -63,8 +69,55 @@ Edit `config.json` — no code changes needed:
   ]
 }
 ```
+`instruction` is optional and appears between the area label and upload box.
+`form_version` is optional and appears at the very bottom of the public form page,
+and also in admin page headers for quick confirmation of the live config.
+`marking_template_docx` is optional and points to the DOCX template used to
+extract answers for marking preview.
+`marking_extraction_areas` is optional and lists area keys (for example `report`)
+where DOCX answer extraction should run.
+`marking_preview_max_images` is optional and limits how many embedded DOCX images
+are included in the admin marking preview.
 Add more areas, change limits, or allow multiple files per area (`max_files > 1`) as needed.
 Restart the app after editing.
+
+### Marking preview (DOCX, no markers)
+
+When a DOCX is uploaded for an area listed in `marking_extraction_areas`, the app
+compares it to the template DOCX and stores extracted answers as sidecar JSON in
+the submission metadata folder. You can view this output in Admin via
+**View marking preview** on the submission detail page.
+
+The preview shows sequential extracted IDs (`Q1`, `Q2`, ...) and also keeps the
+template order ID (`template Qn`) when they differ. This avoids numbering gaps
+while still showing where each answer came from in the template.
+
+Embedded images from the DOCX are also extracted (up to the configured max) and
+displayed inline in the same marking preview page.
+
+The marking preview page supports two review modes:
+- **Per student**: all extracted answers for one submission, with previous/next
+  submission navigation.
+- **Per question**: one selected question at a time, with previous/next student
+  navigation and a question button bar.
+
+Each answer now includes quick image links; selecting one opens a larger popup
+preview for easier manual marking.
+
+The page also includes marker fields for each extracted question:
+- `score` (free-form, e.g. `4/5`)
+- `comment` (marker notes)
+
+Extraction confidence is shown per answer (`high`, `medium`, `low`) with a
+numeric score and short reasons.
+
+You can manually trigger **Re-extract marking preview**, but only when the
+submission has no saved score/comment values. Once marking exists for a
+submission, re-extraction is blocked to protect manual grading work.
+
+If `marking_template_docx` is not set, the app attempts auto-discovery using the
+first matching file in `making_template/` or `marking_template/` with pattern
+`marking_template*.docx`.
 
 ## 3. Email (Gmail)
 
@@ -224,8 +277,8 @@ cron job copying them off-server).
 
 ## Notes / things worth knowing
 
-- Confirmation codes are 4 characters from `A-Z2-9` excluding `0/O/1/I` to avoid
-  visual ambiguity, and checked for uniqueness against the database.
+- Confirmation codes are 6 letters from `A-Z` excluding `I/O` to avoid visual
+  ambiguity, and checked for uniqueness against the database.
 - IP address, user agent, and submission timestamp are stored with every
   submission (visible in the admin detail page).
 - The admin page is protected by a single username/password in `.env`. For anything

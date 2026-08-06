@@ -227,4 +227,84 @@
 
     xhr.send(formData);
   });
+
+  // Code-based submission preview
+  const lookupForm = document.getElementById("lookup-form");
+  const lookupCodeInput = document.getElementById("lookup-code");
+  const lookupError = document.getElementById("lookup-error");
+  const lookupResult = document.getElementById("lookup-result");
+  const lookupMeta = document.getElementById("lookup-meta");
+  const lookupFiles = document.getElementById("lookup-files");
+  const lookupDeclaredWrap = document.getElementById("lookup-declared-wrap");
+  const lookupDeclared = document.getElementById("lookup-declared");
+
+  function clearLookupUi() {
+    lookupError.style.display = "none";
+    lookupError.textContent = "";
+    lookupResult.style.display = "none";
+    lookupMeta.textContent = "";
+    lookupFiles.innerHTML = "";
+    lookupDeclaredWrap.style.display = "none";
+    lookupDeclared.innerHTML = "";
+  }
+
+  lookupCodeInput.addEventListener("input", () => {
+    lookupCodeInput.value = lookupCodeInput.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 6);
+  });
+
+  lookupForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    clearLookupUi();
+
+    const code = lookupCodeInput.value.trim().toUpperCase();
+    if (!/^[A-Z]{6}$/.test(code)) {
+      lookupError.style.display = "block";
+      lookupError.textContent = "Please enter a valid 6-letter confirmation code.";
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/submission-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code })
+      });
+      const payload = await response.json();
+
+      if (!response.ok || !payload.ok || !payload.submission) {
+        lookupError.style.display = "block";
+        lookupError.textContent = payload.error || "No submission was found for that code.";
+        return;
+      }
+
+      const submission = payload.submission;
+      lookupMeta.textContent = `Code ${submission.code} | Submitted at ${submission.submitted_at}`;
+
+      if (submission.files && submission.files.length) {
+        submission.files.forEach((file) => {
+          const li = document.createElement("li");
+          li.textContent = `${file.area_label}: ${file.original_filename}`;
+          lookupFiles.appendChild(li);
+        });
+      } else {
+        const li = document.createElement("li");
+        li.textContent = "No uploaded files were recorded for this submission.";
+        lookupFiles.appendChild(li);
+      }
+
+      if (submission.declarations && submission.declarations.length) {
+        submission.declarations.forEach((decl) => {
+          const li = document.createElement("li");
+          li.textContent = decl.area_label;
+          lookupDeclared.appendChild(li);
+        });
+        lookupDeclaredWrap.style.display = "block";
+      }
+
+      lookupResult.style.display = "block";
+    } catch (err) {
+      lookupError.style.display = "block";
+      lookupError.textContent = "Network error. Please try again.";
+    }
+  });
 })();

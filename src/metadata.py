@@ -1,7 +1,10 @@
 """Extract non-destructive metadata from uploaded submission files."""
+import base64
+import difflib
 import hashlib
 import json
 import mimetypes
+import re
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +26,9 @@ CORE_PROPERTIES = {
     "language": "language",
     "version": "version",
 }
+
+MARKS_PATTERN = re.compile(r"\((?:\d+\s*M|\d+\s*MARKS?)\)", re.IGNORECASE)
+DOCX_MEDIA_PREFIX = "word/media/"
 
 
 def _sha256(path):
@@ -154,3 +160,224 @@ def extract_ampl_archive(path, destination):
             extracted.append((target, info.filename))
 
     return extracted
+
+
+def _docx_paragraphs(path):
+    """Return non-empty paragraphs from a DOCX document body."""
+    paragraphs = []
+    with zipfile.ZipFile(path) as archive:
+        root = ElementTree.fromstring(archive.read("word/document.xml"))
+        ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        for paragraph in root.findall(".//w:p", ns):
+            text_parts = [
+                node.text for node in paragraph.findall(".//w:t", ns)
+                if node.text and node.text.strip()
+            ]
+            joined = "".join(text_parts).strip()
+            if joined:
+                paragraphs.append(joined)
+    return paragraphs
+
+
+def _docx_images(path, max_images=12, max_total_bytes=8 * 1024 * 1024):
+    """Extract embedded DOCX images as base64 payloads for preview rendering."""
+    images = []
+    total_bytes = 0
+    with zipfile.ZipFile(path) as archive:
+        media_entries = sorted(
+            item for item in archive.infolist()
+            if item.filename.startswith(DOCX_MEDIA_PREFIX) and not item.is_dir()
+        )
+
+        for info in media_entries:
+            if len(images) >= max_images:
+                break
+
+            raw = archive.read(info.filename)
+            if not raw:
+                continue
+
+            if total_bytes + len(raw) > max_total_bytes:
+                break
+            total_bytes += len(raw)
+
+            extension = Path(info.filename).suffix.lower()
+            content_type = {
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".gif": "image/gif",
+                ".bmp": "image/bmp",
+                ".tif": "image/tiff",
+                ".tiff": "image/tiff",
+                ".webp": "image/webp",
+            }.get(extension, "application/octet-stream")
+
+            images.append({
+                "filename": Path(info.filename).name,
+                "content_type": content_type,
+                "size_bytes": len(raw),
+                "data_base64": base64.b64encode(raw).decode("ascii"),
+            })
+
+    return images
+
+
+def _is_question_prompt(line):
+    line = line.strip()
+    if not line:
+        return False
+
+    lowered = line.lower()
+    if lowered.startswith(("question ", "note:", "naming of files:", "submission:", "important:")):
+        return False
+
+    return line.endswith("?") or bool(MARKS_PATTERN.search(line))
+
+
+def _estimate_answer_confidence(answer_paragraphs, unmatched_count):
+    """Return a simple confidence estimate for answer extraction quality."""
+    char_count = sum(len(line.strip()) for line in answer_paragraphs)
+    paragraph_count = len([line for line in answer_paragraphs if line.strip()])
+
+    score = 1.0
+    reasons = []
+
+    if paragraph_count == 0:
+        score = 0.2
+        reasons.append("No non-empty answer paragraph was found.")
+    elif char_count < 40:
+        score -= 0.35
+        reasons.append("Answer text is short; mapping may be weak.")
+    elif char_count < 120:
+        score -= 0.15
+        reasons.append("Answer text is moderate length.")
+
+    if unmatched_count > 0:
+        score -= min(0.3, 0.1 * unmatched_count)
+        reasons.append("Some inserted text could not be tied to a question.")
+
+    score = max(0.0, min(1.0, score))
+    if score >= 0.85:
+        level = "high"
+    elif score >= 0.6:
+        level = "medium"
+    else:
+        level = "low"
+
+    return {
+        "score": round(score, 3),
+        "level": level,
+        "reasons": reasons,
+        "char_count": char_count,
+        "paragraph_count": paragraph_count,
+    }
+
+
+def resolve_marking_template_docx(project_root, submission_config):
+    """Locate the active DOCX template used for extraction."""
+    project_root = Path(project_root)
+    configured = submission_config.get("marking_template_docx")
+    if configured:
+        configured_path = Path(configured)
+        if not configured_path.is_absolute():
+            configured_path = project_root / configured_path
+        return configured_path if configured_path.exists() else None
+
+    for folder_name in ("making_template", "marking_template"):
+        folder = project_root / folder_name
+        if not folder.exists():
+            continue
+        matches = sorted(folder.glob("marking_template*.docx"))
+        if matches:
+            return matches[0]
+    return None
+
+
+def extract_answers_with_template(submission_docx, template_docx):
+    """Extract free-text answers by comparing a filled DOCX to a template DOCX."""
+    template_lines = _docx_paragraphs(template_docx)
+    submission_lines = _docx_paragraphs(submission_docx)
+
+    matcher = difflib.SequenceMatcher(a=template_lines, b=submission_lines, autojunk=False)
+    prompt_order = []
+    prompt_index = {}
+    answer_blocks = {}
+    unmatched_insertions = []
+    pending_prompts = []
+
+    def register_prompt(line):
+        if line not in prompt_index:
+            prompt_index[line] = len(prompt_order) + 1
+            prompt_order.append(line)
+
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag in {"equal", "replace", "delete"}:
+            for line in template_lines[i1:i2]:
+                if _is_question_prompt(line):
+                    register_prompt(line)
+                    pending_prompts.append(line)
+
+        if tag in {"insert", "replace"}:
+            inserted = [line for line in submission_lines[j1:j2] if line.strip()]
+            if not inserted:
+                continue
+            if pending_prompts:
+                target_prompt = pending_prompts.pop(0)
+                answer_blocks.setdefault(target_prompt, []).append(inserted)
+            else:
+                unmatched_insertions.append(inserted)
+
+    answers = []
+    for prompt in prompt_order:
+        blocks = answer_blocks.get(prompt)
+        if not blocks:
+            continue
+        flat = []
+        for block in blocks:
+            flat.extend(block)
+        answers.append({
+            "question_id": f"Q{len(answers) + 1}",
+            "template_question_id": f"Q{prompt_index[prompt]}",
+            "prompt": prompt,
+            "answer": "\n".join(flat),
+            "answer_paragraphs": flat,
+        })
+
+    unmatched = ["\n".join(block) for block in unmatched_insertions]
+
+    unmatched_count = len(unmatched_insertions)
+    for answer in answers:
+        answer["confidence"] = _estimate_answer_confidence(
+            answer.get("answer_paragraphs", []),
+            unmatched_count,
+        )
+
+    return {
+        "answer_count": len(answers),
+        "answers": answers,
+        "unmatched_insertions": unmatched,
+    }
+
+
+def extract_marking_preview(submission_docx, submission_config, project_root):
+    """Build the JSON payload consumed by the admin marking preview page."""
+    template_docx = resolve_marking_template_docx(project_root, submission_config)
+    if not template_docx:
+        return {
+            "status": "skipped",
+            "reason": "No marking template DOCX was found.",
+        }
+
+    extraction = extract_answers_with_template(submission_docx, template_docx)
+    max_images = int(submission_config.get("marking_preview_max_images", 12))
+    images = _docx_images(submission_docx, max_images=max_images)
+    return {
+        "status": "ok",
+        "template_file": str(template_docx),
+        "submission_file": str(Path(submission_docx)),
+        "extracted_at": datetime.now(timezone.utc).isoformat(),
+        "image_count": len(images),
+        "images": images,
+        **extraction,
+    }

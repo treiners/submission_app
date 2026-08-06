@@ -11,7 +11,10 @@
   <div class="topbar">
     <div>
       <h1 style="margin-bottom:0;">{{ assignment_title }}</h1>
-      <p class="subtitle" style="margin-bottom:0;">{{ submissions | length }} submission(s)</p>
+      <p class="subtitle" style="margin-bottom:0;">
+        {{ submissions | length }} submission(s)
+        {% if form_version %}&middot; Form version {{ form_version }}{% endif %}
+      </p>
     </div>
     <a class="logout" href="{{ url_for('admin_logout') }}">Log out</a>
   </div>
