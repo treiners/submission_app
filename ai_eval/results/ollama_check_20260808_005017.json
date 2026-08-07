@@ -1,0 +1,49 @@
+{
+  "generated_at": "2026-08-08T00:50:17.416283",
+  "endpoint": "http://127.0.0.1:11434",
+  "model": "qwen2.5:7b",
+  "cases_file": "ai_eval/sample_case_template.json",
+  "summary": {
+    "total_cases": 3,
+    "ok_cases": 0,
+    "failed_cases": 3,
+    "exact_score_matches": 0,
+    "within_one_score_matches": 0,
+    "has_reference_pairs": 0
+  },
+  "results": [
+    {
+      "case_id": "sample_001_q1",
+      "question_id": "Q1",
+      "reference_score": 5.0,
+      "ai_score": null,
+      "score_delta": null,
+      "ok": false,
+      "error": "Connection error: <urlopen error [Errno 1] Operation not permitted>",
+      "parsed_response": null,
+      "raw_response": ""
+    },
+    {
+      "case_id": "sample_002_q1",
+      "question_id": "Q1",
+      "reference_score": 5.0,
+      "ai_score": null,
+      "score_delta": null,
+      "ok": false,
+      "error": "Connection error: <urlopen error [Errno 1] Operation not permitted>",
+      "parsed_response": null,
+      "raw_response": ""
+    },
+    {
+      "case_id": "sample_003_q1",
+      "question_id": "Q1",
+      "reference_score": 5.0,
+      "ai_score": null,
+      "score_delta": null,
+      "ok": false,
+      "error": "Connection error: <urlopen error [Errno 1] Operation not permitted>",
+      "parsed_response": null,
+      "raw_response": ""
+    }
+  ]
+}

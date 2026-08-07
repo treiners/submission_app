@@ -339,17 +339,59 @@ def extract_answers_with_template(submission_docx, template_docx):
     template_lines = _docx_paragraphs(template_docx)
     submission_lines = _docx_paragraphs(submission_docx)
 
+    def normalize_prompt_line(value):
+        value = (value or "").strip().lower()
+        value = re.sub(r"\s+", " ", value)
+        value = re.sub(r"\s+\(", "(", value)
+        return value
+
     matcher = difflib.SequenceMatcher(a=template_lines, b=submission_lines, autojunk=False)
     prompt_order = []
     prompt_index = {}
     answer_blocks = {}
     unmatched_insertions = []
     pending_prompts = []
+    known_prompts = [line for line in template_lines if _is_question_prompt(line)]
+    prompt_lookup = {
+        normalize_prompt_line(prompt): prompt
+        for prompt in known_prompts
+    }
 
     def register_prompt(line):
         if line not in prompt_index:
             prompt_index[line] = len(prompt_order) + 1
             prompt_order.append(line)
+
+    def consume_inserted_lines(inserted_lines):
+        if not inserted_lines:
+            return
+
+        current_target = pending_prompts.pop(0) if pending_prompts else None
+        chunk = []
+
+        def flush_chunk(target_prompt, lines):
+            if not lines:
+                return
+            if target_prompt:
+                answer_blocks.setdefault(target_prompt, []).append(lines[:])
+            else:
+                unmatched_insertions.append(lines[:])
+
+        for line in inserted_lines:
+            normalized = normalize_prompt_line(line)
+            matched_prompt = prompt_lookup.get(normalized)
+            if matched_prompt:
+                flush_chunk(current_target, chunk)
+                chunk = []
+                register_prompt(matched_prompt)
+                current_target = matched_prompt
+                if matched_prompt in pending_prompts:
+                    pending_prompts.remove(matched_prompt)
+                continue
+
+            chunk.append(line)
+
+        flush_chunk(current_target, chunk)
 
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag in {"equal", "replace", "delete"}:
@@ -362,11 +404,7 @@ def extract_answers_with_template(submission_docx, template_docx):
             inserted = [line for line in submission_lines[j1:j2] if line.strip()]
             if not inserted:
                 continue
-            if pending_prompts:
-                target_prompt = pending_prompts.pop(0)
-                answer_blocks.setdefault(target_prompt, []).append(inserted)
-            else:
-                unmatched_insertions.append(inserted)
+            consume_inserted_lines(inserted)
 
     answers = []
     for prompt in prompt_order:

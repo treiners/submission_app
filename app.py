@@ -9,6 +9,7 @@ import sys
 import tempfile
 from functools import wraps
 from pathlib import Path
+from urllib import error as urlerror, request as urlrequest
 
 from dotenv import load_dotenv
 from flask import (
@@ -50,6 +51,8 @@ STORAGE_ENV = {
 
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ"  # letters only, excludes I/O to reduce confusion
 CODE_PATTERN = re.compile(r"^[A-Z]{6}$")
+OLLAMA_ENDPOINT = os.environ.get("OLLAMA_ENDPOINT", "http://127.0.0.1:11434")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
 
 
 def generate_code():
@@ -127,6 +130,133 @@ def _extract_marking_preview_for_submission_file(submission_record, file_record)
     out_file = metadata_folder / f"{file_record['area_key']}_{file_record['stored_filename']}.answers.json"
     metadata.write_metadata(out_file, preview)
     return True
+
+
+def _extract_json_object(text):
+    text = (text or "").strip()
+    if not text:
+        return None
+
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    start = text.find("{")
+    if start == -1:
+        return None
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for idx in range(start, len(text)):
+        char = text[idx]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                candidate = text[start:idx + 1]
+                try:
+                    parsed = json.loads(candidate)
+                    return parsed if isinstance(parsed, dict) else None
+                except json.JSONDecodeError:
+                    return None
+    return None
+
+
+def _parse_max_score_from_marks_label(marks_label):
+    match = re.search(r"(\d+)", marks_label or "")
+    if match:
+        try:
+            return float(match.group(1))
+        except ValueError:
+            return 5.0
+    return 5.0
+
+
+def _build_marking_ai_prompt(question_id, prompt, answer, marks_label):
+    max_score = _parse_max_score_from_marks_label(marks_label)
+    return (
+        "You are helping an academic marker draft a provisional mark. "
+        "Return strict JSON only and no markdown. "
+        "Required keys: score, feedback_comment, rationale, minimum_requirements_met, strengths, gaps. "
+        "score must be numeric in [0, max_score]. "
+        "minimum_requirements_met must be true or false. "
+        "strengths and gaps must be short string arrays.\n\n"
+        f"Question ID: {question_id}\n"
+        f"Question prompt: {prompt}\n"
+        f"Student answer: {answer}\n"
+        f"Mark label: {marks_label or 'n/a'}\n"
+        f"max_score: {max_score}\n"
+    )
+
+
+def _generate_ai_marking_suggestion(question_id, prompt, answer, marks_label):
+    max_score = _parse_max_score_from_marks_label(marks_label)
+    payload = {
+        "model": OLLAMA_MODEL,
+        "prompt": _build_marking_ai_prompt(question_id, prompt, answer, marks_label),
+        "stream": False,
+        "options": {
+            "temperature": 0.1,
+        },
+    }
+
+    endpoint = OLLAMA_ENDPOINT.rstrip("/") + "/api/generate"
+    req = urlrequest.Request(
+        endpoint,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    timeout_seconds = int(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "90"))
+
+    with urlrequest.urlopen(req, timeout=timeout_seconds) as resp:
+        body = json.loads(resp.read().decode("utf-8"))
+
+    raw_text = str(body.get("response", "")).strip()
+    parsed = _extract_json_object(raw_text)
+    if not parsed:
+        return {
+            "ok": False,
+            "error": "Model output was not valid JSON.",
+            "raw_response": raw_text,
+        }
+
+    score = parsed.get("score")
+    try:
+        numeric_score = float(score)
+    except (TypeError, ValueError):
+        numeric_score = None
+
+    if numeric_score is not None:
+        numeric_score = max(0.0, min(max_score, numeric_score))
+
+    suggestion = {
+        "score": numeric_score,
+        "feedback_comment": str(parsed.get("feedback_comment", "")).strip(),
+        "rationale": str(parsed.get("rationale", "")).strip(),
+        "minimum_requirements_met": bool(parsed.get("minimum_requirements_met", False)),
+        "strengths": parsed.get("strengths", []) if isinstance(parsed.get("strengths", []), list) else [],
+        "gaps": parsed.get("gaps", []) if isinstance(parsed.get("gaps", []), list) else [],
+        "max_score": max_score,
+        "model": OLLAMA_MODEL,
+    }
+    return {"ok": True, "suggestion": suggestion, "raw_response": raw_text}
 
 
 @app.context_processor
@@ -588,9 +718,21 @@ def admin_submission_metadata(submission_id):
         metadata_folder = local_files[0].parents[1] / "metadata"
         for metadata_path in sorted(metadata_folder.glob("*.json")):
             try:
+                if metadata_path.name.endswith(".answers.json"):
+                    # Generated extraction preview, not a student-submitted file.
+                    continue
                 data = json.loads(metadata_path.read_text(encoding="utf-8"))
+                if data.get("extracted_from"):
+                    # Metadata for files unpacked from a submitted archive.
+                    continue
+                original_name = data.get("original_filename", "")
+                if not original_name:
+                    # Defensive guard: skip JSON files that are not file-metadata records.
+                    continue
+                display_name = Path(original_name).stem if original_name else "Metadata entry"
                 metadata_entries.append({
                     "filename": data.get("original_filename", metadata_path.name),
+                    "display_name": display_name,
                     "data": data,
                 })
             except (OSError, json.JSONDecodeError):
@@ -640,6 +782,14 @@ def admin_submission_marking(submission_id):
         item["question_id"]: item
         for item in db.list_marking_assessments(submission_id)
     }
+    eval_candidates = {
+        answer["question_id"]: (
+            db.get_eval_case_candidate(submission_id, answer["question_id"]) or {}
+        )
+        for preview in previews
+        for answer in preview["data"].get("answers", [])
+        if answer.get("question_id")
+    }
     can_reextract = not db.has_marking_assessments(submission_id)
 
     submissions = db.list_submissions()
@@ -688,6 +838,7 @@ def admin_submission_marking(submission_id):
                 matched = find_answer_for_question(full_previews, selected_question)
                 if not matched:
                     continue
+                eval_candidate = db.get_eval_case_candidate(full_submission["id"], selected_question)
                 question_entries.append({
                     "submission_id": full_submission["id"],
                     "name": full_submission["name"],
@@ -698,6 +849,7 @@ def admin_submission_marking(submission_id):
                         item["question_id"]: item
                         for item in db.list_marking_assessments(full_submission["id"])
                     }.get(selected_question, {}),
+                    "eval_candidate": eval_candidate,
                     **matched,
                 })
 
@@ -722,6 +874,7 @@ def admin_submission_marking(submission_id):
         selected_question=selected_question,
         question_entry=question_entry,
         assessments=assessments,
+        eval_candidates=eval_candidates,
         can_reextract=can_reextract,
         prev_submission_id=prev_submission_id,
         next_submission_id=next_submission_id,
@@ -742,12 +895,38 @@ def admin_save_marking_assessment(submission_id):
     comment = request.form.get("comment", "").strip()
     view_mode = request.form.get("view", "student").strip().lower()
     selected_question = request.form.get("selected_question", "").strip()
+    question_prompt = request.form.get("question_prompt", "").strip()
+    student_answer = request.form.get("student_answer", "").strip()
+    marks_label = request.form.get("marks_label", "").strip()
+    include_eval_case = request.form.get("include_eval_case") == "true"
+    ai_draft_used = request.form.get("ai_draft_used") == "true"
 
     if not question_id:
         flash("Question ID is required for saving marking.")
     else:
         db.save_marking_assessment(submission_id, question_id, score, comment)
         flash(f"Saved marking for {question_id}.")
+
+        # Auto-capture manual (non-AI) entries into evaluation candidates.
+        if not ai_draft_used:
+            if question_prompt and student_answer and (score or comment):
+                db.save_eval_case_candidate(
+                    submission_id=submission_id,
+                    question_id=question_id,
+                    question_prompt=question_prompt,
+                    student_answer=student_answer,
+                    marks_label=marks_label,
+                    reference_score=score,
+                    reference_comment=comment,
+                    ai_draft_used=False,
+                    include_in_eval=include_eval_case,
+                )
+            else:
+                flash(
+                    f"Evaluation candidate for {question_id} was skipped (missing prompt/answer/mark fields)."
+                )
+        else:
+            flash(f"{question_id} was saved as AI-assisted marking and not auto-added as an evaluation candidate.")
 
     return redirect(
         url_for(
@@ -757,6 +936,43 @@ def admin_save_marking_assessment(submission_id):
             question=selected_question or None,
         )
     )
+
+
+@app.route("/admin/submission/<int:submission_id>/marking/ai-suggest", methods=["POST"])
+@login_required
+def admin_marking_ai_suggest(submission_id):
+    submission = db.get_submission(submission_id)
+    if not submission:
+        return jsonify({"ok": False, "error": "Submission not found."}), 404
+
+    payload = request.get_json(silent=True) or {}
+    question_id = str(payload.get("question_id", "")).strip()
+    prompt = str(payload.get("question_prompt", "")).strip()
+    answer = str(payload.get("student_answer", "")).strip()
+    marks_label = str(payload.get("marks_label", "")).strip()
+
+    if not question_id or not prompt or not answer:
+        return jsonify({
+            "ok": False,
+            "error": "question_id, question_prompt, and student_answer are required.",
+        }), 400
+
+    try:
+        result = _generate_ai_marking_suggestion(question_id, prompt, answer, marks_label)
+    except urlerror.URLError as error:
+        return jsonify({
+            "ok": False,
+            "error": f"Could not connect to Ollama at {OLLAMA_ENDPOINT}: {error}",
+        }), 503
+    except (ValueError, json.JSONDecodeError) as error:
+        return jsonify({
+            "ok": False,
+            "error": f"Invalid response from Ollama: {error}",
+        }), 502
+
+    if not result.get("ok"):
+        return jsonify(result), 502
+    return jsonify(result)
 
 
 @app.route("/admin/submission/<int:submission_id>/marking/reextract", methods=["POST"])

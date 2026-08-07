@@ -46,6 +46,10 @@
       <input type="hidden" name="question" value="{{ selected_question or '' }}">
       <button type="submit" class="marking-tab-btn {% if view_mode == 'question' %}active{% endif %}">Per question</button>
     </form>
+    <label class="marking-auto-toggle">
+      <input type="checkbox" id="ai-autodraft-toggle" checked>
+      Auto AI draft
+    </label>
   </div>
 
   {% if view_mode == 'student' %}
@@ -90,9 +94,16 @@
       {% endif %}
       <pre>{{ answer.answer }}</pre>
 
-      <form method="POST" action="{{ url_for('admin_save_marking_assessment', submission_id=submission.id) }}" class="assessment-form">
+      <form method="POST"
+        action="{{ url_for('admin_save_marking_assessment', submission_id=submission.id) }}"
+        class="assessment-form"
+        data-suggest-url="{{ url_for('admin_marking_ai_suggest', submission_id=submission.id) }}">
         <input type="hidden" name="question_id" value="{{ answer.question_id }}">
         <input type="hidden" name="view" value="student">
+        <input type="hidden" name="question_prompt" value="{{ answer.prompt }}">
+        <input type="hidden" name="student_answer" value="{{ answer.answer }}">
+        <input type="hidden" name="marks_label" value="{{ answer.marks_label or '' }}">
+        <input type="hidden" name="ai_draft_used" value="false">
         <div class="assessment-grid">
           <label>Score
             <input type="text" name="score" value="{{ assessments.get(answer.question_id, {}).get('score', '') }}" placeholder="e.g. 4/5">
@@ -101,7 +112,32 @@
             <textarea name="comment" rows="3" class="autosize" placeholder="Marker notes">{{ assessments.get(answer.question_id, {}).get('comment', '') }}</textarea>
           </label>
         </div>
-        <button type="submit" class="primary save-marking-btn">Save marking</button>
+        <label class="eval-case-toggle">
+          <input type="checkbox" name="include_eval_case" value="true" {% if eval_candidates.get(answer.question_id, {}).get('include_in_eval') %}checked{% endif %}>
+          Use this manual marking as an AI evaluation example
+        </label>
+        {% if eval_candidates.get(answer.question_id) %}
+        <div class="eval-case-meta">
+          Candidate saved &middot; include={{ 'yes' if eval_candidates.get(answer.question_id, {}).get('include_in_eval') else 'no' }}
+        </div>
+        {% endif %}
+        <div class="assessment-actions">
+          <button type="submit" class="primary save-marking-btn">Save marking</button>
+          <button type="button" class="marking-ai-btn marking-ai-apply-btn">
+            Apply AI draft
+          </button>
+          <button type="button" class="marking-ai-btn marking-ai-redo-btn secondary">
+            Redo AI draft
+          </button>
+          <span class="marking-ai-status" aria-live="polite"></span>
+        </div>
+        <div class="ai-draft-preview" hidden>
+          <div class="ai-draft-preview-title">AI draft preview</div>
+          <div class="ai-draft-state" data-state="preview">Preview only</div>
+          <div class="ai-draft-preview-row"><strong>Score:</strong> <span class="ai-preview-score">-</span></div>
+          <div class="ai-draft-preview-row"><strong>Comment:</strong> <span class="ai-preview-comment">-</span></div>
+          <div class="ai-draft-preview-row"><strong>Rationale:</strong> <span class="ai-preview-rationale">-</span></div>
+        </div>
       </form>
 
       {% if answer.images %}
@@ -202,10 +238,17 @@
     {% endif %}
     <pre>{{ question_entry.answer.answer }}</pre>
 
-    <form method="POST" action="{{ url_for('admin_save_marking_assessment', submission_id=question_entry.submission_id) }}" class="assessment-form">
+        <form method="POST"
+          action="{{ url_for('admin_save_marking_assessment', submission_id=question_entry.submission_id) }}"
+          class="assessment-form"
+          data-suggest-url="{{ url_for('admin_marking_ai_suggest', submission_id=question_entry.submission_id) }}">
       <input type="hidden" name="question_id" value="{{ question_entry.answer.question_id }}">
       <input type="hidden" name="view" value="question">
       <input type="hidden" name="selected_question" value="{{ selected_question }}">
+      <input type="hidden" name="question_prompt" value="{{ question_entry.answer.prompt }}">
+      <input type="hidden" name="student_answer" value="{{ question_entry.answer.answer }}">
+      <input type="hidden" name="marks_label" value="{{ question_entry.answer.marks_label or '' }}">
+      <input type="hidden" name="ai_draft_used" value="false">
       <div class="assessment-grid">
         <label>Score
           <input type="text" name="score" value="{{ question_entry.assessment.get('score', '') }}" placeholder="e.g. 4/5">
@@ -214,7 +257,32 @@
           <textarea name="comment" rows="3" class="autosize" placeholder="Marker notes">{{ question_entry.assessment.get('comment', '') }}</textarea>
         </label>
       </div>
-      <button type="submit" class="primary save-marking-btn">Save marking</button>
+      <label class="eval-case-toggle">
+        <input type="checkbox" name="include_eval_case" value="true" {% if question_entry.eval_candidate and question_entry.eval_candidate.get('include_in_eval') %}checked{% endif %}>
+        Use this manual marking as an AI evaluation example
+      </label>
+      {% if question_entry.eval_candidate %}
+      <div class="eval-case-meta">
+        Candidate saved &middot; include={{ 'yes' if question_entry.eval_candidate.get('include_in_eval') else 'no' }}
+      </div>
+      {% endif %}
+      <div class="assessment-actions">
+        <button type="submit" class="primary save-marking-btn">Save marking</button>
+        <button type="button" class="marking-ai-btn marking-ai-apply-btn">
+          Apply AI draft
+        </button>
+        <button type="button" class="marking-ai-btn marking-ai-redo-btn secondary">
+          Redo AI draft
+        </button>
+        <span class="marking-ai-status" aria-live="polite"></span>
+      </div>
+      <div class="ai-draft-preview" hidden>
+        <div class="ai-draft-preview-title">AI draft preview</div>
+        <div class="ai-draft-state" data-state="preview">Preview only</div>
+        <div class="ai-draft-preview-row"><strong>Score:</strong> <span class="ai-preview-score">-</span></div>
+        <div class="ai-draft-preview-row"><strong>Comment:</strong> <span class="ai-preview-comment">-</span></div>
+        <div class="ai-draft-preview-row"><strong>Rationale:</strong> <span class="ai-preview-rationale">-</span></div>
+      </div>
     </form>
 
     {% if question_entry.images %}
@@ -287,6 +355,205 @@
     resizeArea(area);
     area.addEventListener('input', () => resizeArea(area));
   });
+
+  const aiForms = document.querySelectorAll('form.assessment-form[data-suggest-url]');
+  const aiState = new WeakMap();
+  const autoToggle = document.getElementById('ai-autodraft-toggle');
+  const autoToggleStorageKey = 'markingAiAutoDraftEnabled';
+
+  let autoEnabled = true;
+  const storedAuto = localStorage.getItem(autoToggleStorageKey);
+  if (storedAuto === 'false') {
+    autoEnabled = false;
+  }
+  if (autoToggle) {
+    autoToggle.checked = autoEnabled;
+  }
+
+  function getAiState(form) {
+    if (!aiState.has(form)) {
+      aiState.set(form, { loading: false, suggestion: null });
+    }
+    return aiState.get(form);
+  }
+
+  function setStatus(form, message) {
+    const statusEl = form.querySelector('.marking-ai-status');
+    if (statusEl) {
+      statusEl.textContent = message || '';
+    }
+  }
+
+  function setAiButtonsDisabled(form, disabled) {
+    const buttons = form.querySelectorAll('.marking-ai-btn');
+    buttons.forEach((btn) => {
+      btn.disabled = !!disabled;
+    });
+  }
+
+  function updatePreview(form, suggestion) {
+    const preview = form.querySelector('.ai-draft-preview');
+    if (!preview || !suggestion) {
+      return;
+    }
+    const score = preview.querySelector('.ai-preview-score');
+    const comment = preview.querySelector('.ai-preview-comment');
+    const rationale = preview.querySelector('.ai-preview-rationale');
+    if (score) {
+      score.textContent = suggestion.score !== null && suggestion.score !== undefined ? String(suggestion.score) : '-';
+    }
+    if (comment) {
+      comment.textContent = suggestion.feedback_comment || '-';
+    }
+    if (rationale) {
+      rationale.textContent = suggestion.rationale || '-';
+    }
+    preview.hidden = false;
+  }
+
+  function setDraftState(form, isApplied) {
+    const stateEl = form.querySelector('.ai-draft-state');
+    if (!stateEl) {
+      return;
+    }
+    if (isApplied) {
+      stateEl.textContent = 'Applied to form';
+      stateEl.setAttribute('data-state', 'applied');
+    } else {
+      stateEl.textContent = 'Preview only';
+      stateEl.setAttribute('data-state', 'preview');
+    }
+  }
+
+  function applySuggestionToForm(form, suggestion) {
+    const scoreInput = form.querySelector('input[name="score"]');
+    const commentInput = form.querySelector('textarea[name="comment"]');
+    const aiDraftFlag = form.querySelector('input[name="ai_draft_used"]');
+    const evalToggle = form.querySelector('input[name="include_eval_case"]');
+
+    if (scoreInput && suggestion.score !== null && suggestion.score !== undefined) {
+      scoreInput.value = String(suggestion.score);
+    }
+
+    const commentText = suggestion.feedback_comment || suggestion.rationale || '';
+    if (commentInput && commentText) {
+      commentInput.value = commentText;
+      resizeArea(commentInput);
+    }
+
+    if (aiDraftFlag) {
+      aiDraftFlag.value = 'true';
+    }
+    if (evalToggle) {
+      evalToggle.checked = false;
+    }
+
+    setDraftState(form, true);
+    setStatus(form, `AI draft applied (${suggestion.model || 'model'}).`);
+  }
+
+  async function requestSuggestion(form, forceRefresh, applyAfterFetch) {
+    const state = getAiState(form);
+    if (state.loading) {
+      return;
+    }
+
+    if (!forceRefresh && state.suggestion) {
+      if (applyAfterFetch) {
+        applySuggestionToForm(form, state.suggestion);
+      } else {
+        setStatus(form, `AI draft ready (${state.suggestion.model || 'model'}).`);
+      }
+      return;
+    }
+
+    const suggestUrl = form.getAttribute('data-suggest-url') || '';
+    if (!suggestUrl) {
+      setStatus(form, 'AI route is not configured.');
+      return;
+    }
+
+    const questionId = (form.querySelector('input[name="question_id"]') || {}).value || '';
+    const questionPrompt = (form.querySelector('input[name="question_prompt"]') || {}).value || '';
+    const studentAnswer = (form.querySelector('input[name="student_answer"]') || {}).value || '';
+    const marksLabel = (form.querySelector('input[name="marks_label"]') || {}).value || '';
+
+    state.loading = true;
+    setAiButtonsDisabled(form, true);
+    setStatus(form, forceRefresh ? 'Regenerating AI draft...' : 'Preparing AI draft...');
+
+    try {
+      const response = await fetch(suggestUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question_id: questionId,
+          question_prompt: questionPrompt,
+          student_answer: studentAnswer,
+          marks_label: marksLabel,
+        }),
+      });
+
+      const payload = await response.json();
+      if (!response.ok || !payload.ok || !payload.suggestion) {
+        throw new Error(payload.error || 'AI suggestion failed.');
+      }
+
+      state.suggestion = payload.suggestion;
+      updatePreview(form, state.suggestion);
+      if (applyAfterFetch) {
+        applySuggestionToForm(form, state.suggestion);
+      } else {
+        setDraftState(form, false);
+        setStatus(form, `AI draft ready (${state.suggestion.model || 'model'}).`);
+      }
+    } catch (error) {
+      setStatus(form, error.message || 'Could not generate AI draft.');
+    } finally {
+      state.loading = false;
+      setAiButtonsDisabled(form, false);
+    }
+  }
+
+  aiForms.forEach((form) => {
+    const applyBtn = form.querySelector('.marking-ai-apply-btn');
+    const redoBtn = form.querySelector('.marking-ai-redo-btn');
+
+    if (applyBtn) {
+      applyBtn.addEventListener('click', async () => {
+        await requestSuggestion(form, false, true);
+      });
+    }
+
+    if (redoBtn) {
+      redoBtn.addEventListener('click', async () => {
+        await requestSuggestion(form, true, true);
+      });
+    }
+
+    // Prefetch suggestion in the background so apply is instant when possible.
+    if (autoEnabled) {
+      requestSuggestion(form, false, false);
+    } else {
+      setStatus(form, 'Auto AI draft is off.');
+    }
+  });
+
+  if (autoToggle) {
+    autoToggle.addEventListener('change', () => {
+      autoEnabled = !!autoToggle.checked;
+      localStorage.setItem(autoToggleStorageKey, autoEnabled ? 'true' : 'false');
+      if (!autoEnabled) {
+        aiForms.forEach((form) => {
+          setStatus(form, 'Auto AI draft is off.');
+        });
+        return;
+      }
+      aiForms.forEach((form) => {
+        requestSuggestion(form, false, false);
+      });
+    });
+  }
 })();
 </script>
 </body>

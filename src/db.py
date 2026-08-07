@@ -67,9 +67,25 @@ CREATE TABLE IF NOT EXISTS marking_assessments (
     UNIQUE(submission_id, question_id)
 );
 
+CREATE TABLE IF NOT EXISTS eval_case_candidates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    submission_id INTEGER NOT NULL REFERENCES submissions(id),
+    question_id TEXT NOT NULL,
+    question_prompt TEXT NOT NULL,
+    student_answer TEXT NOT NULL,
+    marks_label TEXT,
+    reference_score TEXT,
+    reference_comment TEXT,
+    ai_draft_used INTEGER NOT NULL DEFAULT 0,
+    include_in_eval INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL,
+    UNIQUE(submission_id, question_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_submissions_student_id ON submissions(student_id);
 CREATE INDEX IF NOT EXISTS idx_submissions_code ON submissions(code);
 CREATE INDEX IF NOT EXISTS idx_marking_assessments_submission ON marking_assessments(submission_id);
+CREATE INDEX IF NOT EXISTS idx_eval_case_candidates_include ON eval_case_candidates(include_in_eval);
 """
 
 
@@ -265,6 +281,7 @@ def get_submission_preview_by_code(code):
 
 def delete_submission(submission_id):
     conn = get_connection()
+    conn.execute("DELETE FROM eval_case_candidates WHERE submission_id = ?", (submission_id,))
     conn.execute("DELETE FROM marking_assessments WHERE submission_id = ?", (submission_id,))
     conn.execute("DELETE FROM analysis_runs WHERE submission_id = ?", (submission_id,))
     conn.execute("DELETE FROM submission_files WHERE submission_id = ?", (submission_id,))
@@ -280,6 +297,7 @@ def delete_submission(submission_id):
 
 def delete_all_submissions(reset_ids=True):
     conn = get_connection()
+    conn.execute("DELETE FROM eval_case_candidates")
     conn.execute("DELETE FROM marking_assessments")
     conn.execute("DELETE FROM analysis_runs")
     conn.execute("DELETE FROM submission_files")
@@ -385,3 +403,60 @@ def has_marking_assessments(submission_id):
     ).fetchone()
     conn.close()
     return row is not None
+
+
+def save_eval_case_candidate(
+    submission_id,
+    question_id,
+    question_prompt,
+    student_answer,
+    marks_label,
+    reference_score,
+    reference_comment,
+    ai_draft_used,
+    include_in_eval,
+):
+    conn = get_connection()
+    conn.execute(
+        """INSERT INTO eval_case_candidates
+           (submission_id, question_id, question_prompt, student_answer, marks_label,
+            reference_score, reference_comment, ai_draft_used, include_in_eval, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(submission_id, question_id)
+           DO UPDATE SET
+             question_prompt = excluded.question_prompt,
+             student_answer = excluded.student_answer,
+             marks_label = excluded.marks_label,
+             reference_score = excluded.reference_score,
+             reference_comment = excluded.reference_comment,
+             ai_draft_used = excluded.ai_draft_used,
+             include_in_eval = excluded.include_in_eval,
+             updated_at = excluded.updated_at""",
+        (
+            submission_id,
+            question_id,
+            question_prompt,
+            student_answer,
+            marks_label,
+            reference_score,
+            reference_comment,
+            1 if ai_draft_used else 0,
+            1 if include_in_eval else 0,
+            datetime.now(timezone.utc).isoformat(),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_eval_case_candidate(submission_id, question_id):
+    conn = get_connection()
+    row = conn.execute(
+        """SELECT submission_id, question_id, include_in_eval, ai_draft_used,
+                  reference_score, reference_comment, updated_at
+           FROM eval_case_candidates
+           WHERE submission_id = ? AND question_id = ?""",
+        (submission_id, question_id),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None

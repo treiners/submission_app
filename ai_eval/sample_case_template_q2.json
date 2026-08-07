@@ -1,0 +1,56 @@
+{
+  "cases": [
+    {
+      "case_id": "sample_001_q2",
+      "question_id": "Q2",
+      "question_prompt": "This question is about your expectations on what you learn in this unit and if it helps to secure later an industry position ",
+      "student_answer": "I will learn about how to solve the real-world problems with the help of mathematical models. I would like to get good understanding in decision making by using data, objective functions and constraints. This will help me in cost reduction, time saving and better use of resources in industry. I will improve my analytics skills and problem solving skills which will be important in industry role.",
+      "max_score": 5,
+      "reference_score": 3.5,
+      "reference_minimum_requirements_met": true,
+      "reference_comment": "The answer is good. It shows that the student has a clear understanding of what they expect to learn in the unit and how it will help them in their future career. However, the answer could be improved by providing more specific examples of how the skills learned in this unit will be applied in an industry setting.",
+      "reference_strengths": [
+        ""
+      ],
+      "reference_gaps": [
+        "The answer could be improved by providing more specific examples of how the skills learned in this unit will be applied in an industry setting."
+      ],
+      "notes_for_edge_cases": "Optional note"
+    },
+    {
+      "case_id": "sample_002_q2",
+      "question_id": "Q2",
+      "question_prompt": "This question is about your expectations on what you learn in this unit and if it helps to secure later an industry position ",
+      "student_answer": "From a data analyst perspective, I expect to learn how optimisation models and techniques can be helpful in decision-making in supply chains. As the real-world problems such as inventory management or transportation routing are common but need frameworks/models to tackle. Thus, I think by learning and applying these models in solving in-class assignment, I could improve myself in a decision-making process.",
+      "max_score": 5,
+      "reference_score": 4.5,
+      "reference_minimum_requirements_met": true,
+      "reference_comment": "The answer is good and shows an understanding of how the skills learned in this unit can be applied in an industry setting",
+      "reference_strengths": [
+        "The answer shows an understanding of how the skills learned in this unit can be applied in an industry setting"
+      ],
+      "reference_gaps": [
+        "No real gap, it shows a concrete example of how the skills learned in this unit can be applied in an industry setting"
+      ],
+      "notes_for_edge_cases": "Optional note"
+    },
+    {
+      "case_id": "sample_003_q2",
+      "question_id": "Q2",
+      "question_prompt": "This question is about your expectations on what you learn in this unit and if it helps to secure later an industry position ",
+      "student_answer": "What I expect to learn from this unit is how to make decisions when multiple bases are given. In the supply chain process there are many significant functions and activities and this unit will help me identify them. From what I saw in the unit outline for this module, I understood that I will learn how to utilise and apply both quantitative and qualitative tools to solve distribution and transportation problems.",
+      "max_score": 5,
+      "reference_score": 2,
+      "reference_minimum_requirements_met": false,
+      "reference_comment": "Very generic, looks like using the unit outline to cover topics. It would be good to have an industry example to show how the skills learned in this unit can be applied in an industry setting.",
+      "reference_strengths": [
+        "Mentioning of the decision making and the quantitative and qualitative tools to solve distribution and transportation problems"
+      ],
+      "reference_gaps": [
+        "Missing industry reference to show how the skills learned in this unit can be applied in an industry setting"
+      ],
+      "notes_for_edge_cases": "Optional note"
+    }
+    
+  ]
+}

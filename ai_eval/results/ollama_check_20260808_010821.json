@@ -1,0 +1,88 @@
+{
+  "generated_at": "2026-08-08T01:08:21.842211",
+  "endpoint": "http://127.0.0.1:11434",
+  "model": "qwen2.5:7b",
+  "cases_file": "ai_eval/sample_case_template_q2.json",
+  "summary": {
+    "total_cases": 3,
+    "ok_cases": 3,
+    "failed_cases": 0,
+    "exact_score_matches": 0,
+    "within_one_score_matches": 2,
+    "has_reference_pairs": 3
+  },
+  "results": [
+    {
+      "case_id": "sample_001_q2",
+      "question_id": "Q2",
+      "reference_score": 3.5,
+      "ai_score": 4.0,
+      "score_delta": 0.5,
+      "ok": true,
+      "error": null,
+      "parsed_response": {
+        "score": 4,
+        "minimum_requirements_met": true,
+        "rationale": "The student's answer addresses the key points of learning objectives for real-world problem-solving, decision-making, and skill improvement relevant to an industry position. However, it could be more specific about how these skills directly relate to securing a job.",
+        "feedback_comment": "Your response is clear and covers important aspects of what you expect to learn in this unit. To strengthen your answer, consider providing examples or scenarios that illustrate how these skills can help secure an industry position.",
+        "strengths": [
+          "Addresses key learning objectives",
+          "Relevant to industry applications"
+        ],
+        "gaps": [
+          "Could provide more specific examples",
+          "Lacks direct connection to job security"
+        ]
+      },
+      "raw_response": "{\n  \"score\": 4,\n  \"minimum_requirements_met\": true,\n  \"rationale\": \"The student's answer addresses the key points of learning objectives for real-world problem-solving, decision-making, and skill improvement relevant to an industry position. However, it could be more specific about how these skills directly relate to securing a job.\",\n  \"feedback_comment\": \"Your response is clear and covers important aspects of what you expect to learn in this unit. To strengthen your answer, consider providing examples or scenarios that illustrate how these skills can help secure an industry position.\",\n  \"strengths\": [\n    \"Addresses key learning objectives\",\n    \"Relevant to industry applications\"\n  ],\n  \"gaps\": [\n    \"Could provide more specific examples\",\n    \"Lacks direct connection to job security\"\n  ]\n}"
+    },
+    {
+      "case_id": "sample_002_q2",
+      "question_id": "Q2",
+      "reference_score": 4.5,
+      "ai_score": 3.0,
+      "score_delta": -1.5,
+      "ok": true,
+      "error": null,
+      "parsed_response": {
+        "score": 3,
+        "minimum_requirements_met": true,
+        "rationale": "The answer addresses the expectations of learning optimization models for supply chain management and their application. However, it lacks specific mention of how this knowledge will directly help in securing an industry position.",
+        "feedback_comment": "Your response is clear on your expectations but could be more detailed about the practical applications that would benefit you in a professional setting.",
+        "strengths": [
+          "Clear explanation of expected learning",
+          "Relevance to supply chain management"
+        ],
+        "gaps": [
+          "Lack of connection to industry position",
+          "Limited detail on specific skills or knowledge"
+        ]
+      },
+      "raw_response": "{\n  \"score\": 3,\n  \"minimum_requirements_met\": true,\n  \"rationale\": \"The answer addresses the expectations of learning optimization models for supply chain management and their application. However, it lacks specific mention of how this knowledge will directly help in securing an industry position.\",\n  \"feedback_comment\": \"Your response is clear on your expectations but could be more detailed about the practical applications that would benefit you in a professional setting.\",\n  \"strengths\": [\n    \"Clear explanation of expected learning\",\n    \"Relevance to supply chain management\"\n  ],\n  \"gaps\": [\n    \"Lack of connection to industry position\",\n    \"Limited detail on specific skills or knowledge\"\n  ]\n}"
+    },
+    {
+      "case_id": "sample_003_q2",
+      "question_id": "Q2",
+      "reference_score": 2.0,
+      "ai_score": 3.0,
+      "score_delta": 1.0,
+      "ok": true,
+      "error": null,
+      "parsed_response": {
+        "score": 3,
+        "minimum_requirements_met": true,
+        "rationale": "The student's answer addresses the expectations of learning outcomes, but it is somewhat vague. It does not clearly state how this knowledge will help secure an industry position.",
+        "feedback_comment": "Your response covers the expected learning outcomes well, but could be more specific about how these skills will benefit your future career in logistics or supply chain management.",
+        "strengths": [
+          "Addresses key learning outcomes",
+          "Provides a clear understanding of the unit's content"
+        ],
+        "gaps": [
+          "Lacks connection to industry applications",
+          "Could elaborate on personal benefits and career relevance"
+        ]
+      },
+      "raw_response": "{\n  \"score\": 3,\n  \"minimum_requirements_met\": true,\n  \"rationale\": \"The student's answer addresses the expectations of learning outcomes, but it is somewhat vague. It does not clearly state how this knowledge will help secure an industry position.\",\n  \"feedback_comment\": \"Your response covers the expected learning outcomes well, but could be more specific about how these skills will benefit your future career in logistics or supply chain management.\",\n  \"strengths\": [\n    \"Addresses key learning outcomes\",\n    \"Provides a clear understanding of the unit's content\"\n  ],\n  \"gaps\": [\n    \"Lacks connection to industry applications\",\n    \"Could elaborate on personal benefits and career relevance\"\n  ]\n}"
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "cases": [
+    {
+      "case_id": "sample_001_q1",
+      "question_id": "Q1",
+      "question_prompt": "Please mention the enrolled course and if you take the unit as a mandatory or elective one",
+      "student_answer": "I am enrolled in the Master of Data Science program and I am taking this unit as an elective.",
+      "max_score": 5,
+      "reference_score": 5,
+      "reference_minimum_requirements_met": false,
+      "reference_comment": "The answer is correct. However, it would be better to provide more details about the elective unit.",
+      "reference_strengths": [
+        "Correctly identified the enrolled course"
+      ],
+      "reference_gaps": [
+        "Could provide more detail about the elective unit"
+      ],
+      "notes_for_edge_cases": "Optional note"
+    },
+    {
+      "case_id": "sample_002_q1",
+      "question_id": "Q1",
+      "question_prompt": "Please mention the enrolled course and if you take the unit as a mandatory or elective one",
+      "student_answer": "I am enrolled in Predictive Analytics and I am taking this unit as a mandatory unit.",
+      "max_score": 5,
+      "reference_score": 5,
+      "reference_minimum_requirements_met": true,
+      "reference_comment": "Well done! You have correctly identified your enrolled course and the status of the unit.",
+      "reference_strengths": [
+        "Correctly identified the enrolled course"
+      ],
+      "reference_gaps": [
+        "No gaps"
+      ],
+      "notes_for_edge_cases": "Optional note"
+    },
+    {
+      "case_id": "sample_003_q1",
+      "question_id": "Q1",
+      "question_prompt": "Please mention the enrolled course and if you take the unit as a mandatory or elective one",
+      "student_answer": "Supply Chain Management, elective",
+      "max_score": 5,
+      "reference_score": 5,
+      "reference_minimum_requirements_met": true,
+      "reference_comment": "The answer is ok. Please provide a more detailed response next time.",
+      "reference_strengths": [
+        "Correctly identified the enrolled course"
+      ],
+      "reference_gaps": [
+        "Could provide more detail about the elective unit"
+      ],
+      "notes_for_edge_cases": "Optional note"
+    }
+  ]
+}

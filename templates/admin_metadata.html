@@ -23,7 +23,7 @@
 
   {% for entry in metadata_entries %}
   <div class="card metadata-card">
-    <h2>{{ entry.filename }}</h2>
+    <h2>{{ entry.display_name }}</h2>
     <pre>{{ entry.data | tojson(indent=2) }}</pre>
   </div>
   {% else %}

@@ -1,0 +1,82 @@
+{
+  "generated_at": "2026-08-08T00:50:54.769642",
+  "endpoint": "http://127.0.0.1:11434",
+  "model": "qwen2.5:7b",
+  "cases_file": "ai_eval/sample_case_template.json",
+  "summary": {
+    "total_cases": 3,
+    "ok_cases": 3,
+    "failed_cases": 0,
+    "exact_score_matches": 1,
+    "within_one_score_matches": 2,
+    "has_reference_pairs": 3
+  },
+  "results": [
+    {
+      "case_id": "sample_001_q1",
+      "question_id": "Q1",
+      "reference_score": 5.0,
+      "ai_score": 4.0,
+      "score_delta": -1.0,
+      "ok": true,
+      "error": null,
+      "parsed_response": {
+        "score": 4,
+        "minimum_requirements_met": true,
+        "rationale": "The student correctly identified their enrollment status and the nature of the unit, but did not mention the specific course name.",
+        "feedback_comment": "Good job on identifying your program and the elective nature of this unit. Next time, try to specify the exact course name for clarity.",
+        "strengths": [
+          "Correctly stated enrollment status",
+          "Identified the unit as an elective"
+        ],
+        "gaps": [
+          "Did not mention the specific course name"
+        ]
+      },
+      "raw_response": "{\n  \"score\": 4,\n  \"minimum_requirements_met\": true,\n  \"rationale\": \"The student correctly identified their enrollment status and the nature of the unit, but did not mention the specific course name.\",\n  \"feedback_comment\": \"Good job on identifying your program and the elective nature of this unit. Next time, try to specify the exact course name for clarity.\",\n  \"strengths\": [\n    \"Correctly stated enrollment status\",\n    \"Identified the unit as an elective\"\n  ],\n  \"gaps\": [\n    \"Did not mention the specific course name\"\n  ]\n}"
+    },
+    {
+      "case_id": "sample_002_q1",
+      "question_id": "Q1",
+      "reference_score": 5.0,
+      "ai_score": 5.0,
+      "score_delta": 0.0,
+      "ok": true,
+      "error": null,
+      "parsed_response": {
+        "score": 5,
+        "minimum_requirements_met": true,
+        "rationale": "The student correctly identified the course and indicated whether it is mandatory or elective.",
+        "feedback_comment": "",
+        "strengths": [
+          "Correctly answered the question",
+          "Clarity in response"
+        ],
+        "gaps": []
+      },
+      "raw_response": "{\n  \"score\": 5,\n  \"minimum_requirements_met\": true,\n  \"rationale\": \"The student correctly identified the course and indicated whether it is mandatory or elective.\",\n  \"feedback_comment\": \"\",\n  \"strengths\": [\n    \"Correctly answered the question\",\n    \"Clarity in response\"\n  ],\n  \"gaps\": []\n}"
+    },
+    {
+      "case_id": "sample_003_q1",
+      "question_id": "Q1",
+      "reference_score": 5.0,
+      "ai_score": 3.0,
+      "score_delta": -2.0,
+      "ok": true,
+      "error": null,
+      "parsed_response": {
+        "score": 3,
+        "minimum_requirements_met": true,
+        "rationale": "The student correctly identified the course name but did not mention if it is mandatory or elective.",
+        "feedback_comment": "Good effort! Please ensure to include all required details in your answers.",
+        "strengths": [
+          "Correctly named the course"
+        ],
+        "gaps": [
+          "Did not specify if the unit is mandatory or elective"
+        ]
+      },
+      "raw_response": "{\n  \"score\": 3,\n  \"minimum_requirements_met\": true,\n  \"rationale\": \"The student correctly identified the course name but did not mention if it is mandatory or elective.\",\n  \"feedback_comment\": \"Good effort! Please ensure to include all required details in your answers.\",\n  \"strengths\": [\n    \"Correctly named the course\"\n  ],\n  \"gaps\": [\n    \"Did not specify if the unit is mandatory or elective\"\n  ]\n}"
+    }
+  ]
+}
