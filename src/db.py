@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS submissions (
     ip_address TEXT,
     user_agent TEXT,
     submitted_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'completed',
+    failure_reason TEXT,
     email TEXT,
     email_sent INTEGER NOT NULL DEFAULT 0,
     storage_backend TEXT NOT NULL,
@@ -82,6 +84,17 @@ def get_connection():
 def init_db():
     conn = get_connection()
     conn.executescript(SCHEMA)
+
+    # Lightweight schema migration for existing databases created before
+    # status/failure tracking was introduced.
+    columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(submissions)").fetchall()
+    }
+    if "status" not in columns:
+        conn.execute("ALTER TABLE submissions ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'")
+    if "failure_reason" not in columns:
+        conn.execute("ALTER TABLE submissions ADD COLUMN failure_reason TEXT")
+
     conn.commit()
     conn.close()
 
@@ -94,15 +107,17 @@ def code_exists(code):
 
 
 def create_submission(name, student_id, code, ip_address, user_agent, email,
-                       storage_backend, storage_note=""):
+                       storage_backend, storage_note="", status="processing",
+                       failure_reason=None):
     conn = get_connection()
     cur = conn.execute(
         """INSERT INTO submissions
            (name, student_id, code, ip_address, user_agent, submitted_at,
-            email, email_sent, storage_backend, storage_note)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)""",
+                status, failure_reason, email, email_sent, storage_backend, storage_note)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)""",
         (name, student_id, code, ip_address, user_agent,
-         datetime.now(timezone.utc).isoformat(), email, storage_backend, storage_note),
+            datetime.now(timezone.utc).isoformat(), status, failure_reason,
+            email, storage_backend, storage_note),
     )
     submission_id = cur.lastrowid
     conn.commit()
@@ -141,6 +156,16 @@ def mark_email_sent(submission_id, sent=True):
     conn.execute(
         "UPDATE submissions SET email_sent = ? WHERE id = ?",
         (1 if sent else 0, submission_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_submission_status(submission_id, status, failure_reason=None):
+    conn = get_connection()
+    conn.execute(
+        "UPDATE submissions SET status = ?, failure_reason = ? WHERE id = ?",
+        (status, failure_reason, submission_id),
     )
     conn.commit()
     conn.close()
@@ -245,6 +270,23 @@ def delete_submission(submission_id):
     conn.execute("DELETE FROM submission_files WHERE submission_id = ?", (submission_id,))
     conn.execute("DELETE FROM submission_declarations WHERE submission_id = ?", (submission_id,))
     conn.execute("DELETE FROM submissions WHERE id = ?", (submission_id,))
+    # Reset numbering when all submissions have been removed.
+    remaining = conn.execute("SELECT COUNT(*) AS c FROM submissions").fetchone()["c"]
+    if remaining == 0:
+        conn.execute("DELETE FROM sqlite_sequence WHERE name = 'submissions'")
+    conn.commit()
+    conn.close()
+
+
+def delete_all_submissions(reset_ids=True):
+    conn = get_connection()
+    conn.execute("DELETE FROM marking_assessments")
+    conn.execute("DELETE FROM analysis_runs")
+    conn.execute("DELETE FROM submission_files")
+    conn.execute("DELETE FROM submission_declarations")
+    conn.execute("DELETE FROM submissions")
+    if reset_ids:
+        conn.execute("DELETE FROM sqlite_sequence WHERE name = 'submissions'")
     conn.commit()
     conn.close()
 

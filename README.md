@@ -45,7 +45,7 @@ Edit `config.json` — no code changes needed:
 ```json
 {
   "assignment_title": "Assignment 1 Submission",
-  "form_version": "0.6.0",
+  "form_version": "0.7.0",
   "marking_template_docx": "making_template/marking_template_MATH5007_A1P1_2026_S2.docx",
   "marking_extraction_areas": ["report"],
   "marking_preview_max_images": 12,
@@ -94,6 +94,8 @@ while still showing where each answer came from in the template.
 
 Embedded images from the DOCX are also extracted (up to the configured max) and
 displayed inline in the same marking preview page.
+Image links shown under each answer are now tied to the question where the image
+appears in the original submission.
 
 The marking preview page supports two review modes:
 - **Per student**: all extracted answers for one submission, with previous/next
@@ -114,6 +116,14 @@ numeric score and short reasons.
 You can manually trigger **Re-extract marking preview**, but only when the
 submission has no saved score/comment values. Once marking exists for a
 submission, re-extraction is blocked to protect manual grading work.
+
+If server-side submission processing fails after a submission record is created,
+the record remains visible in Admin with status `failed` and a failure reason for
+triage. The upload API now returns a specific reason string alongside the code.
+
+For test cycles, Admin dashboard includes **Delete all submissions** (confirmation
+required). This removes all submissions and uploaded files, and resets submission
+numbering.
 
 If `marking_template_docx` is not set, the app attempts auto-discovery using the
 first matching file in `making_template/` or `marking_template/` with pattern

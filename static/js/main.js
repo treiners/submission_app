@@ -211,6 +211,7 @@
           ? "A confirmation email has also been sent to you."
           : "We could not send a confirmation email \u2014 please save this code.";
         if (data.storage_note) meta += " " + data.storage_note;
+        if (data.processing_note) meta += " " + data.processing_note;
         document.getElementById("result-meta").textContent = meta;
       } else if (data && data.errors) {
         showErrors(data.errors);

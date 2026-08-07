@@ -29,6 +29,14 @@ CORE_PROPERTIES = {
 
 MARKS_PATTERN = re.compile(r"\((?:\d+\s*M|\d+\s*MARKS?)\)", re.IGNORECASE)
 DOCX_MEDIA_PREFIX = "word/media/"
+DOCX_NAMESPACE = {
+    "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+    "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
+    "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+}
+DOCX_REL_NAMESPACE = {
+    "rel": "http://schemas.openxmlformats.org/package/2006/relationships",
+}
 
 
 def _sha256(path):
@@ -162,21 +170,45 @@ def extract_ampl_archive(path, destination):
     return extracted
 
 
-def _docx_paragraphs(path):
-    """Return non-empty paragraphs from a DOCX document body."""
-    paragraphs = []
+def _docx_paragraph_records(path):
+    """Return paragraph records with text and embedded image filenames."""
+    records = []
     with zipfile.ZipFile(path) as archive:
+        rel_map = {}
+        if "word/_rels/document.xml.rels" in archive.namelist():
+            rel_root = ElementTree.fromstring(archive.read("word/_rels/document.xml.rels"))
+            for rel in rel_root.findall("rel:Relationship", DOCX_REL_NAMESPACE):
+                rel_map[rel.attrib.get("Id", "")] = rel.attrib.get("Target", "")
+
         root = ElementTree.fromstring(archive.read("word/document.xml"))
-        ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
-        for paragraph in root.findall(".//w:p", ns):
+        for paragraph in root.findall(".//w:p", DOCX_NAMESPACE):
             text_parts = [
-                node.text for node in paragraph.findall(".//w:t", ns)
+                node.text for node in paragraph.findall(".//w:t", DOCX_NAMESPACE)
                 if node.text and node.text.strip()
             ]
             joined = "".join(text_parts).strip()
-            if joined:
-                paragraphs.append(joined)
-    return paragraphs
+
+            image_filenames = []
+            for blip in paragraph.findall(".//a:blip", DOCX_NAMESPACE):
+                rid = blip.attrib.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed")
+                target = rel_map.get(rid or "", "")
+                if not target:
+                    continue
+                image_name = Path(target).name
+                if image_name:
+                    image_filenames.append(image_name)
+
+            if joined or image_filenames:
+                records.append({
+                    "text": joined,
+                    "images": image_filenames,
+                })
+    return records
+
+
+def _docx_paragraphs(path):
+    """Return non-empty paragraph text from a DOCX document body."""
+    return [record["text"] for record in _docx_paragraph_records(path) if record["text"]]
 
 
 def _docx_images(path, max_images=12, max_total_bytes=8 * 1024 * 1024):
@@ -184,10 +216,11 @@ def _docx_images(path, max_images=12, max_total_bytes=8 * 1024 * 1024):
     images = []
     total_bytes = 0
     with zipfile.ZipFile(path) as archive:
-        media_entries = sorted(
+        media_entries = [
             item for item in archive.infolist()
             if item.filename.startswith(DOCX_MEDIA_PREFIX) and not item.is_dir()
-        )
+        ]
+        media_entries.sort(key=lambda item: item.filename.lower())
 
         for info in media_entries:
             if len(images) >= max_images:
@@ -233,6 +266,13 @@ def _is_question_prompt(line):
         return False
 
     return line.endswith("?") or bool(MARKS_PATTERN.search(line))
+
+
+def _extract_marks_label(prompt):
+    match = MARKS_PATTERN.search(prompt or "")
+    if not match:
+        return None
+    return match.group(0).strip("()")
 
 
 def _estimate_answer_confidence(answer_paragraphs, unmatched_count):
@@ -340,6 +380,7 @@ def extract_answers_with_template(submission_docx, template_docx):
             "question_id": f"Q{len(answers) + 1}",
             "template_question_id": f"Q{prompt_index[prompt]}",
             "prompt": prompt,
+            "marks_label": _extract_marks_label(prompt),
             "answer": "\n".join(flat),
             "answer_paragraphs": flat,
         })
@@ -360,6 +401,42 @@ def extract_answers_with_template(submission_docx, template_docx):
     }
 
 
+def _attach_images_to_answers(submission_docx, answers, images):
+    """Attach image references to the answer whose prompt appears above the image."""
+    if not answers or not images:
+        return
+
+    records = _docx_paragraph_records(submission_docx)
+    normalize = lambda value: " ".join((value or "").split()).lower()
+    prompt_to_question = {
+        normalize(answer["prompt"]): answer["question_id"]
+        for answer in answers
+    }
+
+    image_by_name = {image["filename"]: image for image in images}
+    question_to_image_names = {answer["question_id"]: [] for answer in answers}
+
+    active_question = None
+    for record in records:
+        norm_text = normalize(record.get("text", ""))
+        if norm_text in prompt_to_question:
+            active_question = prompt_to_question[norm_text]
+        if active_question and record.get("images"):
+            question_to_image_names[active_question].extend(record["images"])
+
+    for answer in answers:
+        seen = set()
+        linked = []
+        for filename in question_to_image_names.get(answer["question_id"], []):
+            if filename in seen:
+                continue
+            image = image_by_name.get(filename)
+            if image:
+                linked.append(image)
+                seen.add(filename)
+        answer["images"] = linked
+
+
 def extract_marking_preview(submission_docx, submission_config, project_root):
     """Build the JSON payload consumed by the admin marking preview page."""
     template_docx = resolve_marking_template_docx(project_root, submission_config)
@@ -372,6 +449,7 @@ def extract_marking_preview(submission_docx, submission_config, project_root):
     extraction = extract_answers_with_template(submission_docx, template_docx)
     max_images = int(submission_config.get("marking_preview_max_images", 12))
     images = _docx_images(submission_docx, max_images=max_images)
+    _attach_images_to_answers(submission_docx, extraction.get("answers", []), images)
     return {
         "status": "ok",
         "template_file": str(template_docx),

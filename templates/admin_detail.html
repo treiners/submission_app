@@ -11,9 +11,12 @@
   <a class="back-link" href="{{ url_for('admin_dashboard') }}">&larr; Back to all submissions</a>
   <h1>Submission #{{ submission.id }}</h1>
   {% if form_version %}<p class="subtitle" style="margin-bottom:12px;">Form version {{ form_version }}</p>{% endif %}
-  <p><a class="back-link" href="{{ url_for('admin_submission_metadata', submission_id=submission.id) }}">View file metadata</a></p>
-  <p><a class="back-link" href="{{ url_for('admin_submission_marking', submission_id=submission.id) }}">View marking preview</a></p>
-  <p><a class="back-link" href="{{ url_for('admin_submission_analysis', submission_id=submission.id) }}">View AMPL analysis</a></p>
+  <div class="admin-action-row">
+    <span class="action-btn active">Submission overview</span>
+    <a class="action-btn" href="{{ url_for('admin_submission_metadata', submission_id=submission.id) }}">View file metadata</a>
+    <a class="action-btn" href="{{ url_for('admin_submission_marking', submission_id=submission.id) }}">View marking preview</a>
+    <a class="action-btn" href="{{ url_for('admin_submission_analysis', submission_id=submission.id) }}">View AMPL analysis</a>
+  </div>
   <form method="POST" action="{{ url_for('admin_delete_submission', submission_id=submission.id) }}" onsubmit="return confirm('Delete this submission and all stored files? This cannot be undone.');">
     <button type="submit" class="danger">Delete submission</button>
   </form>
@@ -24,6 +27,19 @@
       <dt>Student ID</dt><dd>{{ submission.student_id }}</dd>
       <dt>Confirmation code</dt><dd style="font-family: var(--mono);">{{ submission.code }}</dd>
       <dt>Submitted at</dt><dd>{{ submission.submitted_at }}</dd>
+      <dt>Status</dt><dd>
+        {% if submission.status == 'failed' %}
+          <span class="badge warn">failed</span>
+          {% if submission.failure_reason %}<br><span style="font-size:0.8rem;color:var(--ink-soft);">{{ submission.failure_reason }}</span>{% endif %}
+        {% elif submission.status == 'unprocessed' %}
+          <span class="badge warn">unprocessed</span>
+          {% if submission.failure_reason %}<br><span style="font-size:0.8rem;color:var(--ink-soft);">{{ submission.failure_reason }}</span>{% endif %}
+        {% elif submission.status == 'processing' %}
+          <span class="badge">processing</span>
+        {% else %}
+          <span class="badge">completed</span>
+        {% endif %}
+      </dd>
       <dt>IP address</dt><dd>{{ submission.ip_address }}</dd>
       <dt>User agent</dt><dd style="font-size:0.8rem; color:var(--ink-soft);">{{ submission.user_agent }}</dd>
       <dt>Email</dt><dd>{{ submission.email }} &mdash;

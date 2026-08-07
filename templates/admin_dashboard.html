@@ -19,9 +19,18 @@
     <a class="logout" href="{{ url_for('admin_logout') }}">Log out</a>
   </div>
 
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}<div class="flash">{{ messages[-1] }}</div>{% endif %}
+  {% endwith %}
+
   <form class="search-bar" method="GET">
     <input type="text" name="q" placeholder="Search by name, student ID, or code" value="{{ search }}">
     <button type="submit" class="primary" style="width:auto; padding:10px 20px;">Search</button>
+  </form>
+
+  <form class="danger-inline-form" method="POST" action="{{ url_for('admin_delete_all_submissions') }}" onsubmit="return confirm('Delete ALL submissions and uploaded files? This cannot be undone.');">
+    <input type="text" name="confirmation" placeholder="Type DELETE ALL to confirm" autocomplete="off">
+    <button type="submit" class="danger">Delete all submissions</button>
   </form>
 
   <table class="admin-table">
@@ -31,6 +40,7 @@
         <th>Name</th>
         <th>Student ID</th>
         <th>Code</th>
+        <th>Status</th>
         <th>Storage</th>
         <th>Email</th>
         <th>IP</th>
@@ -44,6 +54,19 @@
         <td>{{ s.name }}</td>
         <td>{{ s.student_id }}</td>
         <td style="font-family: var(--mono);">{{ s.code }}</td>
+        <td>
+          {% if s.status == 'failed' %}
+            <span class="badge warn">failed</span>
+            {% if s.failure_reason %}<div style="margin-top:4px; font-size:0.74rem; color:var(--ink-soft);">{{ s.failure_reason }}</div>{% endif %}
+          {% elif s.status == 'unprocessed' %}
+            <span class="badge warn">unprocessed</span>
+            {% if s.failure_reason %}<div style="margin-top:4px; font-size:0.74rem; color:var(--ink-soft);">{{ s.failure_reason }}</div>{% endif %}
+          {% elif s.status == 'processing' %}
+            <span class="badge">processing</span>
+          {% else %}
+            <span class="badge">completed</span>
+          {% endif %}
+        </td>
         <td>{{ s.storage_backend }}</td>
         <td>
           {% if s.email_sent %}
@@ -54,13 +77,14 @@
         </td>
         <td>{{ s.ip_address }}</td>
         <td>
-          <a href="{{ url_for('admin_submission_detail', submission_id=s.id) }}">View</a>
-          &middot;
-          <a href="{{ url_for('admin_submission_metadata', submission_id=s.id) }}">Metadata</a>
+          <div class="admin-table-actions">
+            <a class="admin-table-btn" href="{{ url_for('admin_submission_detail', submission_id=s.id) }}">View</a>
+            <a class="admin-table-btn" href="{{ url_for('admin_submission_metadata', submission_id=s.id) }}">Metadata</a>
+          </div>
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="8" style="color:var(--ink-soft);">No submissions found.</td></tr>
+      <tr><td colspan="9" style="color:var(--ink-soft);">No submissions found.</td></tr>
       {% endfor %}
     </tbody>
   </table>

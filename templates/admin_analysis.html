@@ -14,6 +14,12 @@
     Submission #{{ submission.id }} &middot; {{ submission.name }}
     {% if form_version %}&middot; Form version {{ form_version }}{% endif %}
   </p>
+  <div class="admin-action-row">
+    <a class="action-btn" href="{{ url_for('admin_submission_detail', submission_id=submission.id) }}">Submission overview</a>
+    <a class="action-btn" href="{{ url_for('admin_submission_metadata', submission_id=submission.id) }}">View file metadata</a>
+    <a class="action-btn" href="{{ url_for('admin_submission_marking', submission_id=submission.id) }}">View marking preview</a>
+    <span class="action-btn active">View AMPL analysis</span>
+  </div>
 
   {% with messages = get_flashed_messages() %}
     {% if messages %}<div class="flash">{{ messages[-1] }}</div>{% endif %}

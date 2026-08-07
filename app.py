@@ -236,141 +236,159 @@ def api_submit():
         name=name, student_id=student_id, code=code,
         ip_address=get_client_ip(), user_agent=request.headers.get("User-Agent", ""),
         email=email, storage_backend=primary_backend.name,
+        status="processing",
     )
 
     saved_filenames = []
     used_fallback = False
-
     extraction_areas = set(SUBMISSION_CONFIG.get("marking_extraction_areas", ["report"]))
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        for area_key, files in files_by_area.items():
-            area = AREAS_BY_KEY[area_key]
-            for f in files:
-                safe_name = secure_filename(f.filename)
-                tmp_path = Path(tmpdir) / safe_name
-                f.save(tmp_path)
-
-                area_folder = f"{dest_folder}/{area_key}"
-                try:
-                    result = primary_backend.upload_file(tmp_path, area_folder, safe_name)
-                except storage.StorageError:
-                    result = fallback_backend.upload_file(tmp_path, area_folder, safe_name)
-                    used_fallback = True
-
-                file_metadata = metadata.extract_file_metadata(
-                    tmp_path, f.filename, area_key
-                )
-                metadata_path = (
-                    Path(STORAGE_ENV["LOCAL_UPLOAD_ROOT"])
-                    / dest_folder
-                    / "metadata"
-                    / f"{area_key}_{safe_name}.json"
-                )
-                metadata.write_metadata(metadata_path, file_metadata)
-
-                if area_key in extraction_areas and tmp_path.suffix.lower() == ".docx":
-                    try:
-                        marking_preview = metadata.extract_marking_preview(
-                            submission_docx=tmp_path,
-                            submission_config=SUBMISSION_CONFIG,
-                            project_root=PROJECT_ROOT,
-                        )
-                        preview_path = (
-                            Path(STORAGE_ENV["LOCAL_UPLOAD_ROOT"])
-                            / dest_folder
-                            / "metadata"
-                            / f"{area_key}_{safe_name}.answers.json"
-                        )
-                        metadata.write_metadata(preview_path, marking_preview)
-                    except (OSError, metadata.zipfile.BadZipFile, metadata.ElementTree.ParseError) as error:
-                        app.logger.warning(
-                            "Marking preview extraction failed for submission %s (%s): %s",
-                            submission_id,
-                            safe_name,
-                            error,
-                        )
-
-                db.add_submission_file(
-                    submission_id=submission_id, area_key=area_key, area_label=area["label"],
-                    original_filename=f.filename, stored_filename=safe_name,
-                    storage_location=result["location"], size_bytes=tmp_path.stat().st_size,
-                )
-                saved_filenames.append(f.filename)
-
-                if area_key == "ampl_code" and tmp_path.suffix.lower() == ".zip":
-                    extract_root = Path(tmpdir) / "ampl_extracted"
-                    try:
-                        extracted_files = metadata.extract_ampl_archive(tmp_path, extract_root)
-                    except (metadata.zipfile.BadZipFile, OSError) as error:
-                        app.logger.warning("AMPL archive extraction failed for submission %s: %s", submission_id, error)
-                        extracted_files = []
-
-                    for extracted_path, archive_name in extracted_files:
-                        relative_path = extracted_path.relative_to(extract_root)
-                        extracted_folder = f"{area_folder}/{relative_path.parent.as_posix()}"
-                        extracted_name = extracted_path.name
-                        try:
-                            extracted_result = primary_backend.upload_file(
-                                extracted_path, extracted_folder, extracted_name
-                            )
-                        except storage.StorageError:
-                            extracted_result = fallback_backend.upload_file(
-                                extracted_path, extracted_folder, extracted_name
-                            )
-                            used_fallback = True
-
-                        extracted_metadata = metadata.extract_file_metadata(
-                            extracted_path, archive_name, area_key
-                        )
-                        extracted_metadata["extracted_from"] = f.filename
-                        extracted_metadata_path = (
-                            Path(STORAGE_ENV["LOCAL_UPLOAD_ROOT"])
-                            / dest_folder
-                            / "metadata"
-                            / f"{area_key}_{relative_path.as_posix().replace('/', '_')}.json"
-                        )
-                        metadata.write_metadata(extracted_metadata_path, extracted_metadata)
-                        db.add_submission_file(
-                            submission_id=submission_id, area_key=area_key, area_label=area["label"],
-                            original_filename=archive_name, stored_filename=extracted_name,
-                            storage_location=extracted_result["location"],
-                            size_bytes=extracted_path.stat().st_size,
-                        )
-
-    for area in declared_areas:
-        db.add_declaration(submission_id, area["key"], area["label"])
-
-    if used_fallback:
-        conn = db.get_connection()
-        conn.execute(
-            "UPDATE submissions SET storage_backend = ?, storage_note = ? WHERE id = ?",
-            (fallback_backend.name, "Primary storage backend failed; saved locally instead.", submission_id),
-        )
-        conn.commit()
-        conn.close()
-
-    email_sent = False
     try:
-        email_util.send_confirmation_email(
-            gmail_address=os.environ.get("GMAIL_ADDRESS"),
-            gmail_app_password=os.environ.get("GMAIL_APP_PASSWORD"),
-            from_name=os.environ.get("EMAIL_FROM_NAME", "Assignment Submission System"),
-            to_address=email, name=name, student_id=student_id, code=code,
-            filenames=saved_filenames, assignment_title=SUBMISSION_CONFIG["assignment_title"],
-            declared_labels=[a["label"] for a in declared_areas],
-        )
-        email_sent = True
-        db.mark_email_sent(submission_id, True)
-    except Exception as e:
-        app.logger.warning(f"Email send failed for submission {submission_id}: {e}")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for area_key, files in files_by_area.items():
+                area = AREAS_BY_KEY[area_key]
+                for f in files:
+                    safe_name = secure_filename(f.filename)
+                    tmp_path = Path(tmpdir) / safe_name
+                    f.save(tmp_path)
 
-    return jsonify({
-        "ok": True,
-        "code": code,
-        "email_sent": email_sent,
-        "storage_note": "Saved locally (cloud storage unavailable)." if used_fallback else None,
-    })
+                    area_folder = f"{dest_folder}/{area_key}"
+                    try:
+                        result = primary_backend.upload_file(tmp_path, area_folder, safe_name)
+                    except storage.StorageError:
+                        result = fallback_backend.upload_file(tmp_path, area_folder, safe_name)
+                        used_fallback = True
+
+                    file_metadata = metadata.extract_file_metadata(
+                        tmp_path, f.filename, area_key
+                    )
+                    metadata_path = (
+                        Path(STORAGE_ENV["LOCAL_UPLOAD_ROOT"])
+                        / dest_folder
+                        / "metadata"
+                        / f"{area_key}_{safe_name}.json"
+                    )
+                    metadata.write_metadata(metadata_path, file_metadata)
+
+                    if area_key in extraction_areas and tmp_path.suffix.lower() == ".docx":
+                        try:
+                            marking_preview = metadata.extract_marking_preview(
+                                submission_docx=tmp_path,
+                                submission_config=SUBMISSION_CONFIG,
+                                project_root=PROJECT_ROOT,
+                            )
+                            preview_path = (
+                                Path(STORAGE_ENV["LOCAL_UPLOAD_ROOT"])
+                                / dest_folder
+                                / "metadata"
+                                / f"{area_key}_{safe_name}.answers.json"
+                            )
+                            metadata.write_metadata(preview_path, marking_preview)
+                        except (OSError, metadata.zipfile.BadZipFile, metadata.ElementTree.ParseError) as error:
+                            app.logger.warning(
+                                "Marking preview extraction failed for submission %s (%s): %s",
+                                submission_id,
+                                safe_name,
+                                error,
+                            )
+
+                    db.add_submission_file(
+                        submission_id=submission_id, area_key=area_key, area_label=area["label"],
+                        original_filename=f.filename, stored_filename=safe_name,
+                        storage_location=result["location"], size_bytes=tmp_path.stat().st_size,
+                    )
+                    saved_filenames.append(f.filename)
+
+                    if area_key == "ampl_code" and tmp_path.suffix.lower() == ".zip":
+                        extract_root = Path(tmpdir) / "ampl_extracted"
+                        try:
+                            extracted_files = metadata.extract_ampl_archive(tmp_path, extract_root)
+                        except (metadata.zipfile.BadZipFile, OSError) as error:
+                            app.logger.warning("AMPL archive extraction failed for submission %s: %s", submission_id, error)
+                            extracted_files = []
+
+                        for extracted_path, archive_name in extracted_files:
+                            relative_path = extracted_path.relative_to(extract_root)
+                            extracted_folder = f"{area_folder}/{relative_path.parent.as_posix()}"
+                            extracted_name = extracted_path.name
+                            try:
+                                extracted_result = primary_backend.upload_file(
+                                    extracted_path, extracted_folder, extracted_name
+                                )
+                            except storage.StorageError:
+                                extracted_result = fallback_backend.upload_file(
+                                    extracted_path, extracted_folder, extracted_name
+                                )
+                                used_fallback = True
+
+                            extracted_metadata = metadata.extract_file_metadata(
+                                extracted_path, archive_name, area_key
+                            )
+                            extracted_metadata["extracted_from"] = f.filename
+                            extracted_metadata_path = (
+                                Path(STORAGE_ENV["LOCAL_UPLOAD_ROOT"])
+                                / dest_folder
+                                / "metadata"
+                                / f"{area_key}_{relative_path.as_posix().replace('/', '_')}.json"
+                            )
+                            metadata.write_metadata(extracted_metadata_path, extracted_metadata)
+                            db.add_submission_file(
+                                submission_id=submission_id, area_key=area_key, area_label=area["label"],
+                                original_filename=archive_name, stored_filename=extracted_name,
+                                storage_location=extracted_result["location"],
+                                size_bytes=extracted_path.stat().st_size,
+                            )
+
+        for area in declared_areas:
+            db.add_declaration(submission_id, area["key"], area["label"])
+
+        if used_fallback:
+            conn = db.get_connection()
+            conn.execute(
+                "UPDATE submissions SET storage_backend = ?, storage_note = ? WHERE id = ?",
+                (fallback_backend.name, "Primary storage backend failed; saved locally instead.", submission_id),
+            )
+            conn.commit()
+            conn.close()
+
+        email_sent = False
+        try:
+            email_util.send_confirmation_email(
+                gmail_address=os.environ.get("GMAIL_ADDRESS"),
+                gmail_app_password=os.environ.get("GMAIL_APP_PASSWORD"),
+                from_name=os.environ.get("EMAIL_FROM_NAME", "Assignment Submission System"),
+                to_address=email, name=name, student_id=student_id, code=code,
+                filenames=saved_filenames, assignment_title=SUBMISSION_CONFIG["assignment_title"],
+                declared_labels=[a["label"] for a in declared_areas],
+            )
+            email_sent = True
+            db.mark_email_sent(submission_id, True)
+        except Exception as e:
+            app.logger.warning(f"Email send failed for submission {submission_id}: {e}")
+
+        db.update_submission_status(submission_id, "completed")
+
+        return jsonify({
+            "ok": True,
+            "code": code,
+            "email_sent": email_sent,
+            "storage_note": "Saved locally (cloud storage unavailable)." if used_fallback else None,
+        })
+    except Exception as error:
+        failure_reason = f"{type(error).__name__}: {error}"
+        app.logger.exception("Submission processing failed for submission %s", submission_id)
+        db.update_submission_status(submission_id, "unprocessed", failure_reason)
+        return jsonify({
+            "ok": True,
+            "email_sent": False,
+            "code": code,
+            "submission_id": submission_id,
+            "processing_note": (
+                "Your files were received, but automatic processing could not be completed. "
+                "Staff can still access your submission and process it manually."
+            ),
+            "failure_reason": failure_reason[:200],
+        }), 200
 
 
 # ---------- Admin auth ----------
@@ -416,6 +434,31 @@ def admin_dashboard():
         "admin_dashboard.html", submissions=submissions, search=search,
         assignment_title=SUBMISSION_CONFIG["assignment_title"],
     )
+
+
+@app.route("/admin/submissions/delete-all", methods=["POST"])
+@login_required
+def admin_delete_all_submissions():
+    confirmation = request.form.get("confirmation", "").strip()
+    if confirmation != "DELETE ALL":
+        flash("Delete-all cancelled: type DELETE ALL to confirm.")
+        return redirect(url_for("admin_dashboard"))
+
+    upload_root = Path(STORAGE_ENV["LOCAL_UPLOAD_ROOT"]).resolve()
+    db.delete_all_submissions(reset_ids=True)
+
+    if upload_root.exists():
+        for child in upload_root.iterdir():
+            try:
+                if child.is_dir():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+            except OSError:
+                continue
+
+    flash("All submissions were deleted and numbering was reset.")
+    return redirect(url_for("admin_dashboard"))
 
 
 @app.route("/admin/submission/<int:submission_id>")
@@ -587,7 +630,7 @@ def admin_submission_marking(submission_id):
                     return {
                         "preview_file": preview["file"],
                         "answer": answer,
-                        "images": preview["data"].get("images", []),
+                        "images": answer.get("images", []),
                     }
         return None
 

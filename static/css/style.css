@@ -239,6 +239,19 @@ button.danger:hover { background: #8f1d17; }
   font-size: 0.85rem;
 }
 
+.result-return-link {
+  display: inline-block;
+  margin-top: 14px;
+  font-size: 0.86rem;
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.result-return-link:hover {
+  text-decoration: underline;
+}
+
 .lookup-card {
   margin-top: 20px;
 }
@@ -361,6 +374,27 @@ table.admin-table tr:last-child td { border-bottom: none; }
 table.admin-table tr:hover { background: rgba(40, 86, 163, 0.04); }
 table.admin-table a { color: var(--accent); text-decoration: none; font-weight: 600; }
 
+.admin-table-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.admin-table-btn {
+  display: inline-block;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  font-size: 0.78rem;
+  line-height: 1.2;
+}
+
+.admin-table-btn:hover {
+  border-color: var(--accent);
+  background: rgba(40, 86, 163, 0.05);
+}
+
 .search-bar {
   display: flex;
   gap: 10px;
@@ -368,6 +402,17 @@ table.admin-table a { color: var(--accent); text-decoration: none; font-weight: 
 }
 
 .search-bar input { flex: 1; }
+
+.danger-inline-form {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 0 0 16px;
+}
+
+.danger-inline-form input {
+  max-width: 280px;
+}
 
 .topbar {
   display: flex;
@@ -388,6 +433,49 @@ table.admin-table a { color: var(--accent); text-decoration: none; font-weight: 
   font-size: 0.85rem;
   color: var(--accent);
   text-decoration: none;
+}
+
+.admin-action-row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 10px 0 16px;
+}
+
+.action-btn {
+  display: inline-block;
+  width: fit-content;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.action-btn:hover {
+  border-color: var(--accent);
+  background: rgba(40, 86, 163, 0.05);
+}
+
+.action-btn.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+@media (max-width: 640px) {
+  .admin-action-row {
+    flex-direction: column;
+  }
+
+  .action-btn {
+    width: 100%;
+    text-align: center;
+  }
 }
 
 .kv-list { margin: 20px 0; }
@@ -455,21 +543,32 @@ table.admin-table a { color: var(--accent); text-decoration: none; font-weight: 
   margin: 0 0 12px;
 }
 
-.marking-tab {
+.marking-tab-btn {
   display: inline-block;
   font-size: 0.82rem;
   color: var(--accent);
-  text-decoration: none;
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 6px 12px;
   background: #fff;
+  cursor: pointer;
 }
 
-.marking-tab.active {
+.marking-tab-btn.active {
   background: var(--accent);
   color: #fff;
   border-color: var(--accent);
+}
+
+.marks-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--accent-dark);
+  background: rgba(40, 86, 163, 0.12);
 }
 
 .marking-nav {
@@ -674,6 +773,11 @@ table.admin-table a { color: var(--accent); text-decoration: none; font-weight: 
   color: var(--ink);
 }
 
+.assessment-grid textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+
 .save-marking-btn {
   width: auto;
   padding: 8px 12px;
@@ -682,6 +786,11 @@ table.admin-table a { color: var(--accent); text-decoration: none; font-weight: 
 
 @media (max-width: 700px) {
   .reextract-form {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .danger-inline-form {
     flex-direction: column;
     align-items: flex-start;
   }
