@@ -28,13 +28,21 @@ cp .env.example .env
 Edit `.env`:
 - Set `SECRET_KEY` to a long random string.
 - Set `ADMIN_USERNAME` / `ADMIN_PASSWORD`.
+- Set `PORT` if you want a port other than `5000`.
 - Leave `STORAGE_BACKEND=local` to start — this works immediately, no extra setup.
 
 Run it:
 ```bash
 python3 app.py
 ```
-Visit `http://localhost:5000` for the form, `http://localhost:5000/admin` for the admin page.
+Visit `http://localhost:<PORT>` for the form and `http://localhost:<PORT>/admin` for the admin page.
+
+To run two local instances, for example:
+
+```bash
+PORT=5000 python3 app.py
+PORT=5001 python3 app.py
+```
 
 The SQLite database is created automatically at `instance/submissions.db` on first run.
 
@@ -45,7 +53,7 @@ Edit `config.json` — no code changes needed:
 ```json
 {
   "assignment_title": "Assignment 1 Submission",
-  "form_version": "0.9",
+  "form_version": "0.9.1",
   "marking_template_docx": "making_template/marking_template_MATH5007_A1P1_2026_S2.docx",
   "marking_extraction_areas": ["report"],
   "marking_preview_max_images": 12,
