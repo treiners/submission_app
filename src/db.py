@@ -18,6 +18,9 @@ CREATE TABLE IF NOT EXISTS submissions (
     submitted_at TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'completed',
     failure_reason TEXT,
+    marking_excluded INTEGER NOT NULL DEFAULT 0,
+    marking_excluded_reason TEXT,
+    marking_excluded_at TEXT,
     email TEXT,
     email_sent INTEGER NOT NULL DEFAULT 0,
     storage_backend TEXT NOT NULL,
@@ -63,6 +66,8 @@ CREATE TABLE IF NOT EXISTS marking_assessments (
     question_id TEXT NOT NULL,
     score TEXT,
     comment TEXT,
+    comment_source TEXT NOT NULL DEFAULT 'human',
+    ai_reasoning TEXT,
     updated_at TEXT NOT NULL,
     UNIQUE(submission_id, question_id)
 );
@@ -110,6 +115,20 @@ def init_db():
         conn.execute("ALTER TABLE submissions ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'")
     if "failure_reason" not in columns:
         conn.execute("ALTER TABLE submissions ADD COLUMN failure_reason TEXT")
+    if "marking_excluded" not in columns:
+        conn.execute("ALTER TABLE submissions ADD COLUMN marking_excluded INTEGER NOT NULL DEFAULT 0")
+    if "marking_excluded_reason" not in columns:
+        conn.execute("ALTER TABLE submissions ADD COLUMN marking_excluded_reason TEXT")
+    if "marking_excluded_at" not in columns:
+        conn.execute("ALTER TABLE submissions ADD COLUMN marking_excluded_at TEXT")
+
+    marking_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(marking_assessments)").fetchall()
+    }
+    if "comment_source" not in marking_columns:
+        conn.execute("ALTER TABLE marking_assessments ADD COLUMN comment_source TEXT NOT NULL DEFAULT 'human'")
+    if "ai_reasoning" not in marking_columns:
+        conn.execute("ALTER TABLE marking_assessments ADD COLUMN ai_reasoning TEXT")
 
     conn.commit()
     conn.close()
@@ -187,22 +206,65 @@ def update_submission_status(submission_id, status, failure_reason=None):
     conn.close()
 
 
-def list_submissions(search=None):
+def list_submissions(search=None, marking_filter="all"):
+    normalized_filter = str(marking_filter or "all").strip().lower()
+    if normalized_filter not in {"all", "included", "excluded"}:
+        normalized_filter = "all"
+
     conn = get_connection()
+    conditions = []
+    params = []
+
     if search:
         like = f"%{search}%"
-        rows = conn.execute(
-            """SELECT * FROM submissions
-               WHERE name LIKE ? OR student_id LIKE ? OR code LIKE ?
-               ORDER BY submitted_at DESC""",
-            (like, like, like),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM submissions ORDER BY submitted_at DESC"
-        ).fetchall()
+        conditions.append("(name LIKE ? OR student_id LIKE ? OR code LIKE ?)")
+        params.extend([like, like, like])
+
+    if normalized_filter == "included":
+        conditions.append("COALESCE(marking_excluded, 0) = 0")
+    elif normalized_filter == "excluded":
+        conditions.append("COALESCE(marking_excluded, 0) = 1")
+
+    where_clause = ""
+    if conditions:
+        where_clause = " WHERE " + " AND ".join(conditions)
+
+    rows = conn.execute(
+        f"SELECT * FROM submissions{where_clause} ORDER BY submitted_at DESC",
+        tuple(params),
+    ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def list_marking_submission_ids():
+    conn = get_connection()
+    rows = conn.execute(
+        """SELECT id
+           FROM submissions
+           WHERE COALESCE(marking_excluded, 0) = 0
+           ORDER BY submitted_at DESC"""
+    ).fetchall()
+    conn.close()
+    return [int(row["id"]) for row in rows]
+
+
+def update_marking_exclusion(submission_id, excluded, reason=None):
+    excluded_value = 1 if excluded else 0
+    normalized_reason = (reason or "").strip() or None
+    excluded_at = datetime.now(timezone.utc).isoformat() if excluded_value else None
+
+    conn = get_connection()
+    conn.execute(
+        """UPDATE submissions
+           SET marking_excluded = ?,
+               marking_excluded_reason = ?,
+               marking_excluded_at = ?
+           WHERE id = ?""",
+        (excluded_value, normalized_reason if excluded_value else None, excluded_at, submission_id),
+    )
+    conn.commit()
+    conn.close()
 
 
 def get_submission(submission_id):
@@ -358,22 +420,34 @@ def delete_analysis_run(run_id, submission_id):
     conn.close()
 
 
-def save_marking_assessment(submission_id, question_id, score, comment):
+def save_marking_assessment(submission_id, question_id, score, comment, comment_source="human", ai_reasoning=""):
+    normalized_source = str(comment_source or "human").strip().lower()
+    if normalized_source not in {"ai", "ai_human_approved", "human"}:
+        normalized_source = "human"
+
+    normalized_reasoning = (ai_reasoning or "").strip()
+    if normalized_source == "human":
+        normalized_reasoning = ""
+
     conn = get_connection()
     conn.execute(
         """INSERT INTO marking_assessments
-           (submission_id, question_id, score, comment, updated_at)
-           VALUES (?, ?, ?, ?, ?)
+           (submission_id, question_id, score, comment, comment_source, ai_reasoning, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(submission_id, question_id)
            DO UPDATE SET
              score = excluded.score,
              comment = excluded.comment,
+             comment_source = excluded.comment_source,
+             ai_reasoning = excluded.ai_reasoning,
              updated_at = excluded.updated_at""",
         (
             submission_id,
             question_id,
             score,
             comment,
+            normalized_source,
+            normalized_reasoning,
             datetime.now(timezone.utc).isoformat(),
         ),
     )
@@ -384,11 +458,24 @@ def save_marking_assessment(submission_id, question_id, score, comment):
 def list_marking_assessments(submission_id):
     conn = get_connection()
     rows = conn.execute(
-        "SELECT question_id, score, comment, updated_at FROM marking_assessments WHERE submission_id = ?",
+        """SELECT question_id, score, comment, comment_source, ai_reasoning, updated_at
+           FROM marking_assessments
+           WHERE submission_id = ?""",
         (submission_id,),
     ).fetchall()
     conn.close()
     return [dict(row) for row in rows]
+
+
+def delete_marking_assessment(submission_id, question_id):
+    conn = get_connection()
+    conn.execute(
+        """DELETE FROM marking_assessments
+           WHERE submission_id = ? AND question_id = ?""",
+        (submission_id, question_id),
+    )
+    conn.commit()
+    conn.close()
 
 
 def has_marking_assessments(submission_id):
@@ -460,3 +547,14 @@ def get_eval_case_candidate(submission_id, question_id):
     ).fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+def delete_eval_case_candidate(submission_id, question_id):
+    conn = get_connection()
+    conn.execute(
+        """DELETE FROM eval_case_candidates
+           WHERE submission_id = ? AND question_id = ?""",
+        (submission_id, question_id),
+    )
+    conn.commit()
+    conn.close()

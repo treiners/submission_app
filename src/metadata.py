@@ -28,6 +28,7 @@ CORE_PROPERTIES = {
 }
 
 MARKS_PATTERN = re.compile(r"\((?:\d+\s*M|\d+\s*MARKS?)\)", re.IGNORECASE)
+QUESTION_HEADING_PATTERN = re.compile(r"^\s*(?:q(?:uestion)?\s*)?\d{1,2}\s*[\).:-]\s*")
 DOCX_MEDIA_PREFIX = "word/media/"
 DOCX_NAMESPACE = {
     "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
@@ -37,6 +38,8 @@ DOCX_NAMESPACE = {
 DOCX_REL_NAMESPACE = {
     "rel": "http://schemas.openxmlformats.org/package/2006/relationships",
 }
+IMAGE_ONLY_DEFAULT_ANSWER = "The answer contained only an image"
+IMAGE_PROMPT_KEYWORDS = ("image", "photo", "screenshot", "scan")
 
 
 def _sha256(path):
@@ -268,6 +271,222 @@ def _is_question_prompt(line):
     return line.endswith("?") or bool(MARKS_PATTERN.search(line))
 
 
+def _normalize_prompt_line(value):
+    value = (value or "").strip().lower()
+    value = re.sub(r"\s+", " ", value)
+    value = re.sub(r"\s+\(", "(", value)
+    return value
+
+
+def _canonicalize_text(value):
+    value = (value or "").strip().lower()
+    value = re.sub(r"[^a-z0-9]+", " ", value)
+    value = re.sub(r"\s+", " ", value)
+    return value
+
+
+def _tokenize_text(value):
+    return re.findall(r"[a-z0-9]+", (value or "").lower())
+
+
+def _looks_like_question_boundary(line):
+    stripped = (line or "").strip()
+    if not stripped:
+        return False
+    if QUESTION_HEADING_PATTERN.match(stripped):
+        return True
+    if MARKS_PATTERN.search(stripped):
+        return True
+    if stripped.endswith("?"):
+        return True
+    return False
+
+
+def _best_fuzzy_prompt_match(line, known_prompts, minimum_ratio=0.86):
+    """Return the closest template prompt for a boundary-like line, if reliable."""
+    if not _looks_like_question_boundary(line):
+        return None
+
+    candidate = _canonicalize_text(line)
+    if not candidate:
+        return None
+
+    best_prompt = None
+    best_ratio = 0.0
+    for prompt in known_prompts:
+        prompt_canonical = _canonicalize_text(prompt)
+        if not prompt_canonical:
+            continue
+
+        # Handle common student edits where only the first part of the prompt is kept.
+        shorter = min(len(candidate), len(prompt_canonical))
+        longer = max(len(candidate), len(prompt_canonical))
+        if shorter >= 30 and longer > 0:
+            if candidate in prompt_canonical or prompt_canonical in candidate:
+                coverage = shorter / longer
+                if coverage >= 0.6:
+                    return prompt
+
+        ratio = difflib.SequenceMatcher(a=prompt_canonical, b=candidate, autojunk=False).ratio()
+        if ratio > best_ratio:
+            best_ratio = ratio
+            best_prompt = prompt
+
+    if best_ratio >= minimum_ratio:
+        return best_prompt
+    return None
+
+
+def _match_prompt_boundary(line, prompt_lookup, known_prompts):
+    normalized = _normalize_prompt_line(line)
+    exact = prompt_lookup.get(normalized)
+    if exact:
+        return exact, ""
+
+    line_tokens = _tokenize_text(line)
+    best_prefix_prompt = None
+    best_prefix_remainder = ""
+    best_prefix_token_count = -1
+
+    for prompt in known_prompts:
+        prompt_tokens = _tokenize_text(prompt)
+        if len(prompt_tokens) < 6:
+            continue
+        if len(line_tokens) <= len(prompt_tokens):
+            continue
+
+        matched = 0
+        max_compare = min(len(line_tokens), len(prompt_tokens))
+        while matched < max_compare and line_tokens[matched] == prompt_tokens[matched]:
+            matched += 1
+
+        coverage = matched / len(prompt_tokens)
+        if coverage < 0.85:
+            continue
+
+        if matched > best_prefix_token_count:
+            best_prefix_token_count = matched
+            best_prefix_prompt = prompt
+            best_prefix_remainder = " ".join(line_tokens[matched:]).strip()
+
+    if best_prefix_prompt:
+        return best_prefix_prompt, best_prefix_remainder
+
+    fuzzy = _best_fuzzy_prompt_match(line, known_prompts)
+    if fuzzy:
+        return fuzzy, ""
+    return None, ""
+
+
+def _apply_confidence_penalty(confidence, penalty, reason):
+    score = max(0.0, min(1.0, float(confidence.get("score", 0.0)) - penalty))
+    confidence["score"] = round(score, 3)
+    if reason and reason not in confidence.get("reasons", []):
+        confidence.setdefault("reasons", []).append(reason)
+
+    if score >= 0.85:
+        confidence["level"] = "high"
+    elif score >= 0.6:
+        confidence["level"] = "medium"
+    else:
+        confidence["level"] = "low"
+
+
+def _detect_cross_prompt_drift(answers):
+    """Flag answers that appear to include a different question prompt."""
+    prompt_map = {
+        answer.get("question_id"): answer.get("prompt", "")
+        for answer in answers
+        if answer.get("question_id") and answer.get("prompt")
+    }
+    prompt_lookup = {
+        _normalize_prompt_line(prompt): qid
+        for qid, prompt in prompt_map.items()
+        if _normalize_prompt_line(prompt)
+    }
+
+    flagged = set()
+    for answer in answers:
+        current_qid = answer.get("question_id")
+        if not current_qid:
+            continue
+        for line in answer.get("answer_paragraphs", []):
+            normalized_line = _normalize_prompt_line(line)
+            if len(normalized_line) < 20:
+                continue
+
+            exact_qid = prompt_lookup.get(normalized_line)
+            if exact_qid and exact_qid != current_qid:
+                flagged.add(current_qid)
+                break
+
+            fuzzy_match = _best_fuzzy_prompt_match(line, list(prompt_map.values()), minimum_ratio=0.9)
+            if fuzzy_match and fuzzy_match != prompt_map.get(current_qid):
+                flagged.add(current_qid)
+                break
+
+    return flagged
+
+
+def _finalize_answers_for_rendering(answers):
+    """Apply display-safe defaults and remove entries with no text and no image."""
+    finalized = []
+    for answer in answers:
+        text = (answer.get("answer") or "").strip()
+        has_images = bool(answer.get("images"))
+        if not text and has_images:
+            answer["answer"] = IMAGE_ONLY_DEFAULT_ANSWER
+            answer["answer_paragraphs"] = [IMAGE_ONLY_DEFAULT_ANSWER]
+        elif not text and not has_images:
+            # Skip placeholder-only entries where neither text nor image exists.
+            continue
+        finalized.append(answer)
+    return finalized
+
+
+def _is_image_capture_prompt(prompt):
+    lowered = (prompt or "").strip().lower()
+    return any(keyword in lowered for keyword in IMAGE_PROMPT_KEYWORDS)
+
+
+def _rebalance_image_prompt_spillover(answers):
+    """Move likely spillover text from image-only prompts to the next question.
+
+    This is intentionally conservative: it only triggers when the current prompt
+    looks image-focused, has an attached image, and both current/next answers
+    contain substantial text.
+    """
+    if len(answers) < 2:
+        return answers
+
+    for idx in range(len(answers) - 1):
+        current = answers[idx]
+        nxt = answers[idx + 1]
+
+        if not _is_image_capture_prompt(current.get("prompt", "")):
+            continue
+        if not current.get("images"):
+            continue
+
+        current_text = (current.get("answer") or "").strip()
+        next_text = (nxt.get("answer") or "").strip()
+        if len(current_text) < 200 or len(next_text) < 60:
+            continue
+
+        current_paragraphs = [line for line in current.get("answer_paragraphs", []) if str(line).strip()]
+        next_paragraphs = [line for line in nxt.get("answer_paragraphs", []) if str(line).strip()]
+        merged_paragraphs = current_paragraphs + next_paragraphs
+        if not merged_paragraphs:
+            merged_paragraphs = [line for line in (current_text + "\n" + next_text).splitlines() if line.strip()]
+
+        nxt["answer_paragraphs"] = merged_paragraphs
+        nxt["answer"] = "\n".join(merged_paragraphs)
+        current["answer_paragraphs"] = []
+        current["answer"] = ""
+
+    return answers
+
+
 def _extract_marks_label(prompt):
     match = MARKS_PATTERN.search(prompt or "")
     if not match:
@@ -339,12 +558,6 @@ def extract_answers_with_template(submission_docx, template_docx):
     template_lines = _docx_paragraphs(template_docx)
     submission_lines = _docx_paragraphs(submission_docx)
 
-    def normalize_prompt_line(value):
-        value = (value or "").strip().lower()
-        value = re.sub(r"\s+", " ", value)
-        value = re.sub(r"\s+\(", "(", value)
-        return value
-
     matcher = difflib.SequenceMatcher(a=template_lines, b=submission_lines, autojunk=False)
     prompt_order = []
     prompt_index = {}
@@ -353,7 +566,7 @@ def extract_answers_with_template(submission_docx, template_docx):
     pending_prompts = []
     known_prompts = [line for line in template_lines if _is_question_prompt(line)]
     prompt_lookup = {
-        normalize_prompt_line(prompt): prompt
+        _normalize_prompt_line(prompt): prompt
         for prompt in known_prompts
     }
 
@@ -378,8 +591,9 @@ def extract_answers_with_template(submission_docx, template_docx):
                 unmatched_insertions.append(lines[:])
 
         for line in inserted_lines:
-            normalized = normalize_prompt_line(line)
-            matched_prompt = prompt_lookup.get(normalized)
+            matched_prompt, inline_remainder = _match_prompt_boundary(
+                line, prompt_lookup, known_prompts
+            )
             if matched_prompt:
                 flush_chunk(current_target, chunk)
                 chunk = []
@@ -387,6 +601,8 @@ def extract_answers_with_template(submission_docx, template_docx):
                 current_target = matched_prompt
                 if matched_prompt in pending_prompts:
                     pending_prompts.remove(matched_prompt)
+                if inline_remainder:
+                    chunk.append(inline_remainder)
                 continue
 
             chunk.append(line)
@@ -409,13 +625,11 @@ def extract_answers_with_template(submission_docx, template_docx):
     answers = []
     for prompt in prompt_order:
         blocks = answer_blocks.get(prompt)
-        if not blocks:
-            continue
         flat = []
-        for block in blocks:
+        for block in blocks or []:
             flat.extend(block)
         answers.append({
-            "question_id": f"Q{len(answers) + 1}",
+            "question_id": f"Q{prompt_index[prompt]}",
             "template_question_id": f"Q{prompt_index[prompt]}",
             "prompt": prompt,
             "marks_label": _extract_marks_label(prompt),
@@ -431,6 +645,15 @@ def extract_answers_with_template(submission_docx, template_docx):
             answer.get("answer_paragraphs", []),
             unmatched_count,
         )
+
+    drifted_questions = _detect_cross_prompt_drift(answers)
+    for answer in answers:
+        if answer.get("question_id") in drifted_questions:
+            _apply_confidence_penalty(
+                answer["confidence"],
+                0.2,
+                "Possible question-boundary drift detected; verify this answer manually.",
+            )
 
     return {
         "answer_count": len(answers),
@@ -488,6 +711,9 @@ def extract_marking_preview(submission_docx, submission_config, project_root):
     max_images = int(submission_config.get("marking_preview_max_images", 12))
     images = _docx_images(submission_docx, max_images=max_images)
     _attach_images_to_answers(submission_docx, extraction.get("answers", []), images)
+    extraction["answers"] = _rebalance_image_prompt_spillover(extraction.get("answers", []))
+    extraction["answers"] = _finalize_answers_for_rendering(extraction.get("answers", []))
+    extraction["answer_count"] = len(extraction["answers"])
     return {
         "status": "ok",
         "template_file": str(template_docx),

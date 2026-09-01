@@ -25,8 +25,25 @@
 
   <form class="search-bar" method="GET">
     <input type="text" name="q" placeholder="Search by name, student ID, or code" value="{{ search }}">
+    <select name="marking" aria-label="Marking eligibility filter" style="max-width:220px;">
+      <option value="all" {% if marking_filter == 'all' %}selected{% endif %}>All submissions</option>
+      <option value="included" {% if marking_filter == 'included' %}selected{% endif %}>Included only</option>
+      <option value="excluded" {% if marking_filter == 'excluded' %}selected{% endif %}>Excluded only</option>
+    </select>
+    <input type="hidden" name="sort" value="{{ sort_key }}">
+    <input type="hidden" name="dir" value="{{ sort_dir }}">
     <button type="submit" class="primary" style="width:auto; padding:10px 20px;">Search</button>
   </form>
+
+  <p class="subtitle" style="margin:0 0 12px 0;">
+    Marking pool: {{ included_count }} included &middot; {{ excluded_count }} excluded
+  </p>
+
+  <div class="admin-action-row" style="margin-top:0; margin-bottom:10px;">
+    <a class="action-btn" href="{{ url_for('admin_export_marking_overview_xlsx') }}">Download marking (Excel, included only)</a>
+    <a class="action-btn" href="{{ url_for('admin_export_marking_overview_xlsx', include_excluded=1) }}">Download marking (Excel, include excluded)</a>
+    <a class="action-btn" href="{{ url_for('admin_export_marking_students_columns_xlsx') }}">Download marking (Excel, students in columns)</a>
+  </div>
 
   <form class="danger-inline-form" method="POST" action="{{ url_for('admin_delete_all_submissions') }}" onsubmit="return confirm('Delete ALL submissions and uploaded files? This cannot be undone.');">
     <input type="text" name="confirmation" placeholder="Type DELETE ALL to confirm" autocomplete="off">
@@ -36,14 +53,24 @@
   <table class="admin-table">
     <thead>
       <tr>
-        <th>Submitted</th>
-        <th>Name</th>
-        <th>Student ID</th>
-        <th>Code</th>
-        <th>Status</th>
-        <th>Storage</th>
-        <th>Email</th>
-        <th>IP</th>
+        {% macro sort_header(label, key) -%}
+          {% set next_dir = 'asc' if sort_key != key or sort_dir == 'desc' else 'desc' %}
+          <a class="table-sort-link" href="{{ url_for('admin_dashboard', q=search, marking=marking_filter, sort=key, dir=next_dir) }}">
+            <span>{{ label }}</span>
+            {% if sort_key == key %}
+              <span class="sort-indicator">{{ '▲' if sort_dir == 'asc' else '▼' }}</span>
+            {% endif %}
+          </a>
+        {%- endmacro %}
+        <th>{{ sort_header('Submitted', 'submitted_at') }}</th>
+        <th>{{ sort_header('Name', 'name') }}</th>
+        <th>{{ sort_header('Student ID', 'student_id') }}</th>
+        <th>{{ sort_header('Code', 'code') }}</th>
+        <th>{{ sort_header('Status', 'status') }}</th>
+        <th>{{ sort_header('Marking', 'marking') }}</th>
+        <th>{{ sort_header('Storage', 'storage_backend') }}</th>
+        <th>{{ sort_header('Email', 'email_sent') }}</th>
+        <th>{{ sort_header('IP', 'ip_address') }}</th>
         <th></th>
       </tr>
     </thead>
@@ -67,6 +94,33 @@
             <span class="badge">completed</span>
           {% endif %}
         </td>
+        <td>
+          {% if s.marking_excluded %}
+            <span class="badge warn">excluded</span>
+            {% if s.marking_excluded_reason %}
+            <div style="margin-top:4px; font-size:0.74rem; color:var(--ink-soft);">{{ s.marking_excluded_reason }}</div>
+            {% endif %}
+            <form method="POST" action="{{ url_for('admin_update_marking_eligibility', submission_id=s.id) }}" style="margin-top:8px;">
+              <input type="hidden" name="action" value="include">
+              <input type="hidden" name="q" value="{{ search }}">
+              <input type="hidden" name="marking" value="{{ marking_filter }}">
+              <input type="hidden" name="sort" value="{{ sort_key }}">
+              <input type="hidden" name="dir" value="{{ sort_dir }}">
+              <button type="submit" class="admin-table-btn" style="padding:6px 10px;">Include</button>
+            </form>
+          {% else %}
+            <span class="badge">included</span>
+            <form method="POST" action="{{ url_for('admin_update_marking_eligibility', submission_id=s.id) }}" style="margin-top:8px; display:flex; gap:6px; align-items:center;">
+              <input type="hidden" name="action" value="exclude">
+              <input type="hidden" name="q" value="{{ search }}">
+              <input type="hidden" name="marking" value="{{ marking_filter }}">
+              <input type="hidden" name="sort" value="{{ sort_key }}">
+              <input type="hidden" name="dir" value="{{ sort_dir }}">
+              <input type="text" name="reason" placeholder="Reason (optional)" style="min-width:140px; padding:6px 8px; font-size:0.76rem;">
+              <button type="submit" class="admin-table-btn" style="padding:6px 10px;">Exclude</button>
+            </form>
+          {% endif %}
+        </td>
         <td>{{ s.storage_backend }}</td>
         <td>
           {% if s.email_sent %}
@@ -80,11 +134,14 @@
           <div class="admin-table-actions">
             <a class="admin-table-btn" href="{{ url_for('admin_submission_detail', submission_id=s.id) }}">View</a>
             <a class="admin-table-btn" href="{{ url_for('admin_submission_metadata', submission_id=s.id) }}">Metadata</a>
+            {% if not s.marking_excluded %}
+            <a class="admin-table-btn" href="{{ url_for('admin_submission_marking', submission_id=s.id) }}">Marking</a>
+            {% endif %}
           </div>
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="9" style="color:var(--ink-soft);">No submissions found.</td></tr>
+      <tr><td colspan="10" style="color:var(--ink-soft);">No submissions found.</td></tr>
       {% endfor %}
     </tbody>
   </table>

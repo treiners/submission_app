@@ -7,75 +7,114 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-<div class="page wide">
-  <a class="back-link" href="{{ url_for('admin_submission_detail', submission_id=submission.id) }}">&larr; Back to submission</a>
-  <h1>Marking preview</h1>
-  <p class="subtitle">
-    Submission #{{ submission.id }} &middot; {{ submission.name }} &middot; {{ submission.student_id }}
-    {% if form_version %}&middot; Form version {{ form_version }}{% endif %}
-  </p>
-  <div class="admin-action-row">
-    <a class="action-btn" href="{{ url_for('admin_submission_detail', submission_id=submission.id) }}">Submission overview</a>
-    <a class="action-btn" href="{{ url_for('admin_submission_metadata', submission_id=submission.id) }}">View file metadata</a>
-    <span class="action-btn active">View marking preview</span>
-    <a class="action-btn" href="{{ url_for('admin_submission_analysis', submission_id=submission.id) }}">View AMPL analysis</a>
-  </div>
+<div class="page wide marking-page">
+  <div class="marking-workspace">
+    <div class="marking-left-column">
+      <div class="marking-header">
+        <a class="back-link" href="{{ url_for('admin_submission_detail', submission_id=submission.id) }}">&larr; Back to submission</a>
+        <h1>Marking preview</h1>
+        <p class="subtitle">
+          Submission #{{ submission.id }} &middot; {{ submission.name }} &middot; {{ submission.student_id }}
+          {% if form_version %}&middot; Form version {{ form_version }}{% endif %}
+        </p>
+        {% if submission_is_excluded %}
+        <div class="flash" style="background:#fff5d6; border-left-color:#b08900; color:#5c4300;">
+          This submission is currently excluded from marking navigation.
+        </div>
+        {% endif %}
+        <div class="admin-action-row">
+          <a class="action-btn" href="{{ url_for('admin_submission_detail', submission_id=submission.id) }}">Submission overview</a>
+          <a class="action-btn" href="{{ url_for('admin_submission_metadata', submission_id=submission.id) }}">View file metadata</a>
+          <span class="action-btn active">View marking preview</span>
+          <a class="action-btn" href="{{ url_for('admin_submission_analysis', submission_id=submission.id) }}">View AMPL analysis</a>
+          <form method="POST" action="{{ url_for('admin_reextract_marking_preview', submission_id=submission.id) }}" class="reextract-form reextract-header-form">
+            <button type="submit" class="action-btn reextract-action-btn" {% if not can_reextract %}disabled{% endif %}>Re-extract marking preview</button>
+          </form>
+        </div>
 
-  {% with messages = get_flashed_messages() %}
-    {% if messages %}<div class="flash">{{ messages[-1] }}</div>{% endif %}
-  {% endwith %}
+        {% if view_mode == 'student' %}
+        <div class="marking-nav marking-nav-header">
+          {% if prev_submission_id %}
+            <a class="marking-nav-link" data-nav-role="prev" href="{{ url_for('admin_submission_marking', submission_id=prev_submission_id, view='student', unmarked=('1' if show_only_unmarked else None)) }}">&larr; Previous submission</a>
+          {% else %}
+            <span class="marking-nav-disabled">&larr; Previous submission</span>
+          {% endif %}
 
-  <form method="POST" action="{{ url_for('admin_reextract_marking_preview', submission_id=submission.id) }}" class="reextract-form">
-    <button type="submit" class="primary reextract-btn" {% if not can_reextract %}disabled{% endif %}>Re-extract marking preview</button>
-    <span class="reextract-hint">
-      {% if can_reextract %}
-      Available because no scores/comments are saved for this submission.
-      {% else %}
-      Locked: this submission already has saved scores/comments.
-      {% endif %}
-    </span>
-  </form>
+          {% if next_submission_id %}
+            <a class="marking-nav-link" data-nav-role="next" href="{{ url_for('admin_submission_marking', submission_id=next_submission_id, view='student', unmarked=('1' if show_only_unmarked else None)) }}">Next submission &rarr;</a>
+          {% else %}
+            <span class="marking-nav-disabled">Next submission &rarr;</span>
+          {% endif %}
+        </div>
+        <div class="marking-nav-hint marking-nav-hint-header">Hotkeys: <strong>p</strong> previous, <strong>n</strong> next</div>
+        {% elif view_mode == 'question' and question_entry and not question_all_marked %}
+        <div class="marking-nav marking-nav-header">
+          {% if question_prev_submission_id %}
+            <a class="marking-nav-link" data-nav-role="prev" href="{{ url_for('admin_submission_marking', submission_id=question_prev_submission_id, view='question', question=selected_question, unmarked=('1' if show_only_unmarked else None)) }}">&larr; Previous student</a>
+          {% else %}
+            <span class="marking-nav-disabled">&larr; Previous student</span>
+          {% endif %}
 
-  <div class="marking-toolbar">
-    <form method="GET" action="{{ url_for('admin_submission_marking', submission_id=submission.id) }}">
-      <input type="hidden" name="view" value="student">
-      <button type="submit" class="marking-tab-btn {% if view_mode == 'student' %}active{% endif %}">Per student</button>
-    </form>
-    <form method="GET" action="{{ url_for('admin_submission_marking', submission_id=submission.id) }}">
-      <input type="hidden" name="view" value="question">
-      <input type="hidden" name="question" value="{{ selected_question or '' }}">
-      <button type="submit" class="marking-tab-btn {% if view_mode == 'question' %}active{% endif %}">Per question</button>
-    </form>
-    <label class="marking-auto-toggle">
-      <input type="checkbox" id="ai-autodraft-toggle" checked>
-      Auto AI draft
-    </label>
-  </div>
+          {% if question_next_submission_id %}
+            <a class="marking-nav-link" data-nav-role="next" href="{{ url_for('admin_submission_marking', submission_id=question_next_submission_id, view='question', question=selected_question, unmarked=('1' if show_only_unmarked else None)) }}">Next student &rarr;</a>
+          {% else %}
+            <span class="marking-nav-disabled">Next student &rarr;</span>
+          {% endif %}
+        </div>
+        <div class="marking-nav-hint marking-nav-hint-header">Hotkeys: <strong>p</strong> previous, <strong>n</strong> next</div>
+        {% endif %}
 
+        {% with messages = get_flashed_messages() %}
+          {% if messages %}<div class="flash">{{ messages[-1] }}</div>{% endif %}
+        {% endwith %}
+
+        <div class="marking-toolbar">
+          <form method="GET" action="{{ url_for('admin_submission_marking', submission_id=submission.id) }}">
+            <input type="hidden" name="view" value="student">
+            {% if show_only_unmarked %}<input type="hidden" name="unmarked" value="1">{% endif %}
+            <button type="submit" class="marking-tab-btn {% if view_mode == 'student' %}active{% endif %}">Per student</button>
+          </form>
+          <form method="GET" action="{{ url_for('admin_submission_marking', submission_id=submission.id) }}">
+            <input type="hidden" name="view" value="question">
+            <input type="hidden" name="question" value="{{ selected_question or '' }}">
+            {% if show_only_unmarked %}<input type="hidden" name="unmarked" value="1">{% endif %}
+            <button type="submit" class="marking-tab-btn {% if view_mode == 'question' %}active{% endif %}">Per question</button>
+          </form>
+          <label class="marking-auto-toggle">
+            <input type="checkbox" id="ai-autodraft-toggle" checked>
+            Auto AI draft
+          </label>
+          <form method="GET" action="{{ url_for('admin_submission_marking', submission_id=submission.id) }}">
+            <input type="hidden" name="view" value="{{ view_mode }}">
+            {% if view_mode == 'question' %}
+            <input type="hidden" name="question" value="{{ selected_question or '' }}">
+            {% endif %}
+            <label class="marking-auto-toggle">
+              <input type="checkbox" name="unmarked" value="1" {% if show_only_unmarked %}checked{% endif %} onchange="this.form.submit()">
+              Show only unmarked
+            </label>
+          </form>
+        </div>
+      </div>
+
+      <div class="marking-main-column">
   {% if view_mode == 'student' %}
-  <div class="marking-nav">
-    {% if prev_submission_id %}
-      <a class="marking-nav-link" href="{{ url_for('admin_submission_marking', submission_id=prev_submission_id, view='student') }}">&larr; Previous submission</a>
-    {% else %}
-      <span class="marking-nav-disabled">&larr; Previous submission</span>
-    {% endif %}
-
-    {% if next_submission_id %}
-      <a class="marking-nav-link" href="{{ url_for('admin_submission_marking', submission_id=next_submission_id, view='student') }}">Next submission &rarr;</a>
-    {% else %}
-      <span class="marking-nav-disabled">Next submission &rarr;</span>
-    {% endif %}
-  </div>
-
+  {% if student_all_marked %}
+  <div class="card">All marked. No submissions currently need marking.</div>
+  {% else %}
   {% for preview in previews %}
-  <div class="card metadata-card">
+  <div class="preview-file-summary">
     <h2>{{ preview.file }}</h2>
     {% if preview.data.status == 'ok' %}
-      <p style="margin:0 0 10px; color:var(--ink-soft); font-size:0.85rem;">
-        {{ preview.data.answer_count }} extracted answer(s)
-        {% if preview.data.image_count %}&middot; {{ preview.data.image_count }} extracted image(s){% endif %}
-      </p>
+    <p>
+      {{ preview.data.answer_count }} extracted answer(s)
+      {% if preview.data.image_count %}&middot; {{ preview.data.image_count }} extracted image(s){% endif %}
+    </p>
+    {% endif %}
+  </div>
+    {% if preview.data.status == 'ok' %}
       {% for answer in preview.data.answers %}
+      <div class="card metadata-card question-card">
       <h3>
         {{ answer.question_id }}
         {% if answer.template_question_id and answer.template_question_id != answer.question_id %}
@@ -100,10 +139,12 @@
         data-suggest-url="{{ url_for('admin_marking_ai_suggest', submission_id=submission.id) }}">
         <input type="hidden" name="question_id" value="{{ answer.question_id }}">
         <input type="hidden" name="view" value="student">
+        <input type="hidden" name="unmarked" value="{{ '1' if show_only_unmarked else '0' }}">
         <input type="hidden" name="question_prompt" value="{{ answer.prompt }}">
         <input type="hidden" name="student_answer" value="{{ answer.answer }}">
         <input type="hidden" name="marks_label" value="{{ answer.marks_label or '' }}">
         <input type="hidden" name="ai_draft_used" value="false">
+        <input type="hidden" name="ai_reasoning" value="{{ assessments.get(answer.question_id, {}).get('ai_reasoning', '') }}">
         <div class="assessment-grid">
           <label>Score
             <input type="text" name="score" value="{{ assessments.get(answer.question_id, {}).get('score', '') }}" placeholder="e.g. 4/5">
@@ -112,17 +153,67 @@
             <textarea name="comment" rows="3" class="autosize" placeholder="Marker notes">{{ assessments.get(answer.question_id, {}).get('comment', '') }}</textarea>
           </label>
         </div>
-        <label class="eval-case-toggle">
-          <input type="checkbox" name="include_eval_case" value="true" {% if eval_candidates.get(answer.question_id, {}).get('include_in_eval') %}checked{% endif %}>
-          Use this manual marking as an AI evaluation example
-        </label>
+        <div class="assessment-meta-row">
+          <label class="marking-source-label">Source
+            {% set source_value = assessments.get(answer.question_id, {}).get('comment_source', 'human') %}
+            <select name="comment_source" class="marking-source-select">
+              <option value="ai" {% if source_value == 'ai' %}selected{% endif %}>AI generated</option>
+              <option value="ai_human_approved" {% if source_value == 'ai_human_approved' %}selected{% endif %}>AI generated and approved by human</option>
+              <option value="human" {% if source_value == 'human' %}selected{% endif %}>Human</option>
+            </select>
+          </label>
+          <label class="eval-case-toggle">
+            <input type="checkbox" name="include_eval_case" value="true" {% if eval_candidates.get(answer.question_id, {}).get('include_in_eval') %}checked{% endif %}>
+            Use this manual marking as an AI evaluation example
+          </label>
+        </div>
+        <div class="ai-reasoning-note" {% if not assessments.get(answer.question_id, {}).get('ai_reasoning') %}hidden{% endif %}>
+          <strong>AI reasoning:</strong>
+          <span class="ai-reasoning-text">{{ assessments.get(answer.question_id, {}).get('ai_reasoning', '') }}</span>
+        </div>
         {% if eval_candidates.get(answer.question_id) %}
         <div class="eval-case-meta">
           Candidate saved &middot; include={{ 'yes' if eval_candidates.get(answer.question_id, {}).get('include_in_eval') else 'no' }}
         </div>
         {% endif %}
+        {% if answer.images or marking_text_files %}
+        <div class="inline-resource-tools" data-text-preview-url="{{ url_for('admin_marking_text_file', submission_id=marking_text_submission_id) }}">
+          {% if answer.images %}
+          <div class="inline-image-links">
+            {% for image in answer.images %}
+            <button type="button"
+                    class="inline-image-link"
+                    data-popup-src="data:{{ image.content_type }};base64,{{ image.data_base64 }}"
+                    data-popup-title="{{ image.filename }}">
+              Open image {{ image.filename }}
+            </button>
+            {% endfor %}
+          </div>
+          {% endif %}
+          {% if marking_text_files %}
+          <div class="inline-file-viewer">
+            <label class="inline-file-label">View file</label>
+            <select class="text-file-select">
+              {% for text_file in marking_text_files %}
+              <option value="{{ text_file.path }}">{{ text_file.label }}</option>
+              {% endfor %}
+            </select>
+            <button type="button" class="inline-file-open-btn">Open</button>
+            <span class="inline-file-status" aria-live="polite"></span>
+          </div>
+          {% endif %}
+        </div>
+        {% endif %}
         <div class="assessment-actions">
-          <button type="submit" class="primary save-marking-btn">Save marking</button>
+          {% set existing_assessment = assessments.get(answer.question_id, {}) %}
+          <button type="submit" class="primary save-marking-btn{% if existing_assessment.get('updated_at') %} saved{% endif %}">Save marking</button>
+          <button type="submit"
+                  class="marking-ai-btn secondary"
+                  formaction="{{ url_for('admin_undo_marking_assessment', submission_id=submission.id) }}"
+                  formmethod="post"
+                  formnovalidate
+                  onclick="return confirm('Undo marking for {{ answer.question_id }}?');">Undo marking</button>
+          <span class="save-marking-status" aria-live="polite"></span>
           <button type="button" class="marking-ai-btn marking-ai-apply-btn">
             Apply AI draft
           </button>
@@ -139,22 +230,11 @@
           <div class="ai-draft-preview-row"><strong>Rationale:</strong> <span class="ai-preview-rationale">-</span></div>
         </div>
       </form>
-
-      {% if answer.images %}
-      <div class="inline-image-links">
-        {% for image in answer.images %}
-        <button type="button"
-                class="inline-image-link"
-                data-popup-src="data:{{ image.content_type }};base64,{{ image.data_base64 }}"
-                data-popup-title="{{ image.filename }}">
-          Open image {{ loop.index }}
-        </button>
-        {% endfor %}
       </div>
-      {% endif %}
       {% endfor %}
 
       {% if preview.data.images %}
+      <div class="card metadata-card extracted-images-card">
       <h3>Extracted images</h3>
       <div class="marking-images">
         {% for image in preview.data.images %}
@@ -167,6 +247,7 @@
           {% endif %}
         </div>
         {% endfor %}
+      </div>
       </div>
       {% endif %}
 
@@ -181,38 +262,28 @@
         {{ preview.data.reason or 'No extraction result is available for this file.' }}
       </div>
     {% endif %}
-  </div>
   {% else %}
   <div class="card">No marking preview output was found for this submission.</div>
   {% endfor %}
+  {% endif %}
   {% else %}
-  <div class="card metadata-card">
+  <div class="card metadata-card question-card">
     <h2>Question view</h2>
+
+    {% if question_all_marked %}
+    <div class="card" style="margin-top:10px;">All marked. No submissions currently need marking.</div>
+    {% endif %}
 
     {% if question_ids %}
     <div class="question-bar">
       {% for qid in question_ids %}
       <a class="question-pill {% if qid == selected_question %}active{% endif %}"
-         href="{{ url_for('admin_submission_marking', submission_id=(question_entry.submission_id if question_entry else submission.id), view='question', question=qid) }}">{{ qid }}</a>
+         href="{{ url_for('admin_submission_marking', submission_id=(question_entry.submission_id if question_entry else submission.id), view='question', question=qid, unmarked=('1' if show_only_unmarked else None)) }}">{{ qid }}</a>
       {% endfor %}
     </div>
     {% endif %}
 
-    {% if question_entry %}
-    <div class="marking-nav">
-      {% if question_prev_submission_id %}
-        <a class="marking-nav-link" href="{{ url_for('admin_submission_marking', submission_id=question_prev_submission_id, view='question', question=selected_question) }}">&larr; Previous student</a>
-      {% else %}
-        <span class="marking-nav-disabled">&larr; Previous student</span>
-      {% endif %}
-
-      {% if question_next_submission_id %}
-        <a class="marking-nav-link" href="{{ url_for('admin_submission_marking', submission_id=question_next_submission_id, view='question', question=selected_question) }}">Next student &rarr;</a>
-      {% else %}
-        <span class="marking-nav-disabled">Next student &rarr;</span>
-      {% endif %}
-    </div>
-
+    {% if question_entry and not question_all_marked %}
     <div class="marking-student-meta">
       <strong>{{ question_entry.name }}</strong>
       &middot; {{ question_entry.student_id }}
@@ -244,11 +315,13 @@
           data-suggest-url="{{ url_for('admin_marking_ai_suggest', submission_id=question_entry.submission_id) }}">
       <input type="hidden" name="question_id" value="{{ question_entry.answer.question_id }}">
       <input type="hidden" name="view" value="question">
+      <input type="hidden" name="unmarked" value="{{ '1' if show_only_unmarked else '0' }}">
       <input type="hidden" name="selected_question" value="{{ selected_question }}">
       <input type="hidden" name="question_prompt" value="{{ question_entry.answer.prompt }}">
       <input type="hidden" name="student_answer" value="{{ question_entry.answer.answer }}">
       <input type="hidden" name="marks_label" value="{{ question_entry.answer.marks_label or '' }}">
       <input type="hidden" name="ai_draft_used" value="false">
+      <input type="hidden" name="ai_reasoning" value="{{ question_entry.assessment.get('ai_reasoning', '') }}">
       <div class="assessment-grid">
         <label>Score
           <input type="text" name="score" value="{{ question_entry.assessment.get('score', '') }}" placeholder="e.g. 4/5">
@@ -257,17 +330,66 @@
           <textarea name="comment" rows="3" class="autosize" placeholder="Marker notes">{{ question_entry.assessment.get('comment', '') }}</textarea>
         </label>
       </div>
-      <label class="eval-case-toggle">
-        <input type="checkbox" name="include_eval_case" value="true" {% if question_entry.eval_candidate and question_entry.eval_candidate.get('include_in_eval') %}checked{% endif %}>
-        Use this manual marking as an AI evaluation example
-      </label>
+      <div class="assessment-meta-row">
+        <label class="marking-source-label">Source
+          {% set source_value = question_entry.assessment.get('comment_source', 'human') %}
+          <select name="comment_source" class="marking-source-select">
+            <option value="ai" {% if source_value == 'ai' %}selected{% endif %}>AI generated</option>
+            <option value="ai_human_approved" {% if source_value == 'ai_human_approved' %}selected{% endif %}>AI generated and approved by human</option>
+            <option value="human" {% if source_value == 'human' %}selected{% endif %}>Human</option>
+          </select>
+        </label>
+        <label class="eval-case-toggle">
+          <input type="checkbox" name="include_eval_case" value="true" {% if question_entry.eval_candidate and question_entry.eval_candidate.get('include_in_eval') %}checked{% endif %}>
+          Use this manual marking as an AI evaluation example
+        </label>
+      </div>
+      <div class="ai-reasoning-note" {% if not question_entry.assessment.get('ai_reasoning') %}hidden{% endif %}>
+        <strong>AI reasoning:</strong>
+        <span class="ai-reasoning-text">{{ question_entry.assessment.get('ai_reasoning', '') }}</span>
+      </div>
       {% if question_entry.eval_candidate %}
       <div class="eval-case-meta">
         Candidate saved &middot; include={{ 'yes' if question_entry.eval_candidate.get('include_in_eval') else 'no' }}
       </div>
       {% endif %}
+      {% if question_entry.images or marking_text_files %}
+      <div class="inline-resource-tools" data-text-preview-url="{{ url_for('admin_marking_text_file', submission_id=marking_text_submission_id) }}">
+        {% if question_entry.images %}
+        <div class="inline-image-links">
+          {% for image in question_entry.images %}
+          <button type="button"
+                  class="inline-image-link"
+                  data-popup-src="data:{{ image.content_type }};base64,{{ image.data_base64 }}"
+                  data-popup-title="{{ image.filename }}">
+            Open image {{ image.filename }}
+          </button>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if marking_text_files %}
+        <div class="inline-file-viewer">
+          <label class="inline-file-label">View file</label>
+          <select class="text-file-select">
+            {% for text_file in marking_text_files %}
+            <option value="{{ text_file.path }}">{{ text_file.label }}</option>
+            {% endfor %}
+          </select>
+          <button type="button" class="inline-file-open-btn">Open</button>
+          <span class="inline-file-status" aria-live="polite"></span>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
       <div class="assessment-actions">
-        <button type="submit" class="primary save-marking-btn">Save marking</button>
+        <button type="submit" class="primary save-marking-btn{% if question_entry.assessment.get('updated_at') %} saved{% endif %}">Save marking</button>
+        <button type="submit"
+                class="marking-ai-btn secondary"
+                formaction="{{ url_for('admin_undo_marking_assessment', submission_id=question_entry.submission_id) }}"
+                formmethod="post"
+                formnovalidate
+                onclick="return confirm('Undo marking for {{ question_entry.answer.question_id }}?');">Undo marking</button>
+        <span class="save-marking-status" aria-live="polite"></span>
         <button type="button" class="marking-ai-btn marking-ai-apply-btn">
           Apply AI draft
         </button>
@@ -284,24 +406,43 @@
         <div class="ai-draft-preview-row"><strong>Rationale:</strong> <span class="ai-preview-rationale">-</span></div>
       </div>
     </form>
-
-    {% if question_entry.images %}
-    <div class="inline-image-links">
-      {% for image in question_entry.images %}
-      <button type="button"
-              class="inline-image-link"
-              data-popup-src="data:{{ image.content_type }};base64,{{ image.data_base64 }}"
-              data-popup-title="{{ image.filename }}">
-        Open image {{ loop.index }}
-      </button>
-      {% endfor %}
-    </div>
-    {% endif %}
     {% else %}
     <div class="error-box" style="margin:0;">No answer found for this question yet.</div>
     {% endif %}
   </div>
   {% endif %}
+    </div>
+    </div>
+
+    <div class="marking-divider" id="marking-divider" role="separator" aria-orientation="vertical" aria-label="Resize marking and document panes" tabindex="0"></div>
+
+    <aside class="marking-doc-column">
+      <div class="card marking-doc-panel" data-doc-preview-url="{{ url_for('admin_marking_document_preview', submission_id=marking_text_submission_id) }}">
+        <h2>Original document</h2>
+        {% if marking_document_options %}
+        <div class="marking-doc-controls">
+          <select id="marking-doc-select" aria-label="Select submission document for preview">
+            {% for document in marking_document_options %}
+            <option value="{{ document.path }}" data-mode="{{ document.mode }}">{{ document.label }}</option>
+            {% endfor %}
+          </select>
+          <button type="button" id="marking-doc-open-btn" class="marking-ai-btn secondary">Open</button>
+        </div>
+        <span id="marking-doc-status" class="inline-file-status" aria-live="polite"></span>
+        <div class="marking-doc-frame-wrap">
+          <iframe id="marking-doc-frame" title="Original submission preview"></iframe>
+        </div>
+        <p class="hint" style="margin-top:10px;">
+          PDF is shown by default. Choose DOCX view from the selector when needed.
+        </p>
+        {% else %}
+        <p class="subtitle" style="margin:0; font-size:0.84rem;">
+          No local PDF or DOCX submission files were found for this view.
+        </p>
+        {% endif %}
+      </div>
+    </aside>
+  </div>
 </div>
 
 <div id="image-popup" class="image-popup" aria-hidden="true">
@@ -309,6 +450,7 @@
     <button type="button" class="image-popup-close" id="image-popup-close">Close</button>
     <div class="image-popup-title" id="image-popup-title"></div>
     <img id="image-popup-img" src="" alt="Expanded extracted image">
+    <pre id="image-popup-text" hidden></pre>
   </div>
 </div>
 
@@ -316,23 +458,227 @@
 (() => {
   const popup = document.getElementById('image-popup');
   const popupImg = document.getElementById('image-popup-img');
+  const popupText = document.getElementById('image-popup-text');
   const popupTitle = document.getElementById('image-popup-title');
   const closeBtn = document.getElementById('image-popup-close');
   const launchers = document.querySelectorAll('.inline-image-link');
+  const textFileOpeners = document.querySelectorAll('.inline-file-open-btn');
+  const docPanel = document.querySelector('.marking-doc-panel[data-doc-preview-url]');
+  const docSelect = document.getElementById('marking-doc-select');
+  const docOpenBtn = document.getElementById('marking-doc-open-btn');
+  const docStatus = document.getElementById('marking-doc-status');
+  const docFrame = document.getElementById('marking-doc-frame');
+  const markingWorkspace = document.querySelector('.marking-workspace');
+  const markingDivider = document.getElementById('marking-divider');
+  const markingResizeStorageKey = 'markingWorkspaceSplitPct';
+  const minLeftPct = 22;
+  const maxLeftPct = 55;
+  let markingSplitPct = 34;
+
+  function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function getStoredMarkingSplit() {
+    const stored = localStorage.getItem(markingResizeStorageKey);
+    if (stored !== null && stored !== '') {
+      const parsed = Number(stored);
+      if (Number.isFinite(parsed)) {
+        return clamp(parsed, minLeftPct, maxLeftPct);
+      }
+    }
+    return markingSplitPct;
+  }
+
+  function applyMarkingSplit(pct) {
+    if (!markingWorkspace || !markingDivider) {
+      return;
+    }
+    markingSplitPct = clamp(pct, minLeftPct, maxLeftPct);
+    markingWorkspace.style.gridTemplateColumns = `${markingSplitPct}% 12px ${100 - markingSplitPct}%`;
+    localStorage.setItem(markingResizeStorageKey, String(markingSplitPct));
+  }
+
+  function beginDividerDrag(event) {
+    if (!markingWorkspace || !markingDivider) {
+      return;
+    }
+
+    event.preventDefault();
+    markingDivider.classList.add('is-dragging');
+
+    const workspaceRect = markingWorkspace.getBoundingClientRect();
+
+    function updateFromClientX(clientX) {
+      const relative = ((clientX - workspaceRect.left) / workspaceRect.width) * 100;
+      applyMarkingSplit(relative);
+    }
+
+    function onPointerMove(moveEvent) {
+      updateFromClientX(moveEvent.clientX);
+    }
+
+    function stopDragging() {
+      markingDivider.classList.remove('is-dragging');
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', stopDragging);
+      window.removeEventListener('pointercancel', stopDragging);
+    }
+
+    updateFromClientX(event.clientX);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', stopDragging, { once: true });
+    window.addEventListener('pointercancel', stopDragging, { once: true });
+  }
+
+  if (markingWorkspace && markingDivider) {
+    applyMarkingSplit(getStoredMarkingSplit());
+    markingDivider.addEventListener('pointerdown', beginDividerDrag);
+    markingDivider.addEventListener('keydown', (event) => {
+      const key = (event.key || '').toLowerCase();
+      if (key === 'arrowleft' || key === 'arrowdown') {
+        event.preventDefault();
+        applyMarkingSplit(markingSplitPct - 2);
+      } else if (key === 'arrowright' || key === 'arrowup') {
+        event.preventDefault();
+        applyMarkingSplit(markingSplitPct + 2);
+      }
+    });
+    window.addEventListener('resize', () => {
+      applyMarkingSplit(markingSplitPct);
+    });
+  }
 
   function closePopup() {
     popup.setAttribute('aria-hidden', 'true');
     popupImg.removeAttribute('src');
+    popupImg.hidden = false;
+    popupText.textContent = '';
+    popupText.hidden = true;
     popupTitle.textContent = '';
+  }
+
+  function openImagePopup(src, title) {
+    popupImg.src = src || '';
+    popupImg.hidden = false;
+    popupText.textContent = '';
+    popupText.hidden = true;
+    popupTitle.textContent = title || '';
+    popup.setAttribute('aria-hidden', 'false');
+  }
+
+  function openTextPopup(content, title) {
+    popupImg.removeAttribute('src');
+    popupImg.hidden = true;
+    popupText.textContent = content || '';
+    popupText.hidden = false;
+    popupTitle.textContent = title || '';
+    popup.setAttribute('aria-hidden', 'false');
   }
 
   launchers.forEach((btn) => {
     btn.addEventListener('click', () => {
-      popupImg.src = btn.getAttribute('data-popup-src') || '';
-      popupTitle.textContent = btn.getAttribute('data-popup-title') || '';
-      popup.setAttribute('aria-hidden', 'false');
+      openImagePopup(
+        btn.getAttribute('data-popup-src') || '',
+        btn.getAttribute('data-popup-title') || ''
+      );
     });
   });
+
+  textFileOpeners.forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const toolRow = btn.closest('.inline-resource-tools');
+      if (!toolRow) {
+        return;
+      }
+
+      const select = toolRow.querySelector('.text-file-select');
+      const status = toolRow.querySelector('.inline-file-status');
+      const previewUrl = toolRow.getAttribute('data-text-preview-url') || '';
+      const selectedPath = select ? (select.value || '').trim() : '';
+      if (!previewUrl || !selectedPath) {
+        if (status) {
+          status.textContent = 'Select a file to open.';
+        }
+        return;
+      }
+
+      if (status) {
+        status.textContent = 'Opening...';
+      }
+
+      try {
+        const response = await fetch(`${previewUrl}?path=${encodeURIComponent(selectedPath)}`);
+        const payload = await response.json();
+        if (!response.ok || !payload.ok || !payload.file) {
+          throw new Error(payload.error || 'Could not open this file.');
+        }
+
+        const file = payload.file;
+        const suffix = file.truncated ? ` (first ${file.max_bytes} bytes shown)` : '';
+        openTextPopup(file.content || '', `${file.name}${suffix}`);
+        if (status) {
+          status.textContent = '';
+        }
+      } catch (error) {
+        if (status) {
+          status.textContent = error.message || 'Could not open this file.';
+        }
+      }
+    });
+  });
+
+  function setDocStatus(message) {
+    if (docStatus) {
+      docStatus.textContent = message || '';
+    }
+  }
+
+  function openSelectedDocument() {
+    if (!docPanel || !docSelect || !docFrame) {
+      return;
+    }
+    const previewUrl = docPanel.getAttribute('data-doc-preview-url') || '';
+    const selectedPath = (docSelect.value || '').trim();
+    const selectedMode = ((docSelect.selectedOptions && docSelect.selectedOptions[0] && docSelect.selectedOptions[0].dataset.mode) || '').trim();
+    if (!previewUrl || !selectedPath) {
+      setDocStatus('Select a file to open.');
+      return;
+    }
+
+    const modeSuffix = selectedMode ? `&mode=${encodeURIComponent(selectedMode)}` : '';
+    docFrame.src = `${previewUrl}?path=${encodeURIComponent(selectedPath)}${modeSuffix}`;
+    setDocStatus('Loading document...');
+  }
+
+  if (docFrame) {
+    docFrame.addEventListener('load', () => {
+      setDocStatus('');
+    });
+  }
+  if (docOpenBtn) {
+    docOpenBtn.addEventListener('click', openSelectedDocument);
+  }
+  if (docSelect) {
+    docSelect.addEventListener('change', openSelectedDocument);
+    openSelectedDocument();
+  }
+
+  function isTypingTarget(target) {
+    if (!target) {
+      return false;
+    }
+    const tagName = (target.tagName || '').toLowerCase();
+    return target.isContentEditable || tagName === 'input' || tagName === 'textarea' || tagName === 'select';
+  }
+
+  function navigateMarking(direction) {
+    const selector = `.marking-nav-link[data-nav-role="${direction}"]`;
+    const link = document.querySelector(selector);
+    if (link && link.href) {
+      window.location.href = link.href;
+    }
+  }
 
   closeBtn.addEventListener('click', closePopup);
   popup.addEventListener('click', (event) => {
@@ -343,6 +689,28 @@
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && popup.getAttribute('aria-hidden') === 'false') {
       closePopup();
+      return;
+    }
+
+    if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) {
+      return;
+    }
+
+    if (popup.getAttribute('aria-hidden') === 'false') {
+      return;
+    }
+
+    if (isTypingTarget(event.target)) {
+      return;
+    }
+
+    const key = (event.key || '').toLowerCase();
+    if (key === 'n') {
+      event.preventDefault();
+      navigateMarking('next');
+    } else if (key === 'p') {
+      event.preventDefault();
+      navigateMarking('prev');
     }
   });
 
@@ -391,6 +759,24 @@
     });
   }
 
+  function setSaveStatus(form, message, tone) {
+    const saveStatus = form.querySelector('.save-marking-status');
+    if (!saveStatus) {
+      return;
+    }
+    saveStatus.textContent = message || '';
+    saveStatus.classList.toggle('error', tone === 'error');
+    saveStatus.classList.toggle('unsaved', tone === 'unsaved');
+  }
+
+  function markFormDirty(form, message) {
+    const saveBtn = form.querySelector('.save-marking-btn');
+    if (saveBtn && saveBtn.classList.contains('saved')) {
+      saveBtn.classList.remove('saved');
+    }
+    setSaveStatus(form, message || 'Unsaved changes.', 'unsaved');
+  }
+
   function updatePreview(form, suggestion) {
     const preview = form.querySelector('.ai-draft-preview');
     if (!preview || !suggestion) {
@@ -429,6 +815,10 @@
     const scoreInput = form.querySelector('input[name="score"]');
     const commentInput = form.querySelector('textarea[name="comment"]');
     const aiDraftFlag = form.querySelector('input[name="ai_draft_used"]');
+    const aiReasoningInput = form.querySelector('input[name="ai_reasoning"]');
+    const sourceSelect = form.querySelector('select[name="comment_source"]');
+    const reasoningNote = form.querySelector('.ai-reasoning-note');
+    const reasoningText = form.querySelector('.ai-reasoning-text');
     const evalToggle = form.querySelector('input[name="include_eval_case"]');
 
     if (scoreInput && suggestion.score !== null && suggestion.score !== undefined) {
@@ -444,9 +834,26 @@
     if (aiDraftFlag) {
       aiDraftFlag.value = 'true';
     }
+    if (aiReasoningInput) {
+      aiReasoningInput.value = suggestion.rationale || '';
+    }
+    if (sourceSelect) {
+      sourceSelect.value = 'ai';
+    }
+    if (reasoningNote && reasoningText) {
+      if (suggestion.rationale) {
+        reasoningText.textContent = suggestion.rationale;
+        reasoningNote.hidden = false;
+      } else {
+        reasoningText.textContent = '';
+        reasoningNote.hidden = true;
+      }
+    }
     if (evalToggle) {
       evalToggle.checked = false;
     }
+
+    markFormDirty(form, 'Unsaved changes (AI draft applied).');
 
     setDraftState(form, true);
     setStatus(form, `AI draft applied (${suggestion.model || 'model'}).`);
@@ -518,6 +925,69 @@
   aiForms.forEach((form) => {
     const applyBtn = form.querySelector('.marking-ai-apply-btn');
     const redoBtn = form.querySelector('.marking-ai-redo-btn');
+    const saveBtn = form.querySelector('.save-marking-btn');
+    const scoreInput = form.querySelector('input[name="score"]');
+    const commentInput = form.querySelector('textarea[name="comment"]');
+    const sourceSelect = form.querySelector('select[name="comment_source"]');
+    const evalToggleForDirty = form.querySelector('input[name="include_eval_case"]');
+
+    async function submitAssessment() {
+      if (!saveBtn) {
+        return;
+      }
+
+      const previousLabel = saveBtn.textContent;
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving...';
+      setSaveStatus(form, 'Saving...', 'info');
+
+      try {
+        const response = await fetch(form.action, {
+          method: 'POST',
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'application/json',
+          },
+          body: new FormData(form),
+        });
+
+        const payload = await response.json();
+        if (!response.ok || !payload || !payload.ok) {
+          throw new Error((payload && payload.error) || 'Could not save marking.');
+        }
+
+        saveBtn.classList.add('saved');
+        const detail = (payload.detail || '').trim();
+        setSaveStatus(form, detail ? `${payload.message} ${detail}` : payload.message, 'info');
+      } catch (error) {
+        setSaveStatus(form, error.message || 'Could not save marking.', 'error');
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = previousLabel;
+      }
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      await submitAssessment();
+    });
+
+    function markUnsaved() {
+      markFormDirty(form, 'Unsaved changes.');
+    }
+
+    if (scoreInput) {
+      scoreInput.addEventListener('input', markUnsaved);
+    }
+    if (commentInput) {
+      commentInput.addEventListener('input', markUnsaved);
+    }
+    if (sourceSelect) {
+      sourceSelect.addEventListener('change', markUnsaved);
+    }
+    if (evalToggleForDirty) {
+      evalToggleForDirty.addEventListener('change', markUnsaved);
+    }
 
     if (applyBtn) {
       applyBtn.addEventListener('click', async () => {
@@ -528,6 +998,29 @@
     if (redoBtn) {
       redoBtn.addEventListener('click', async () => {
         await requestSuggestion(form, true, true);
+      });
+    }
+
+    const reasoningInput = form.querySelector('input[name="ai_reasoning"]');
+    const reasoningNote = form.querySelector('.ai-reasoning-note');
+    const reasoningText = form.querySelector('.ai-reasoning-text');
+    if (sourceSelect && reasoningInput) {
+      sourceSelect.addEventListener('change', () => {
+        const value = sourceSelect.value;
+        if (value === 'human') {
+          reasoningInput.value = '';
+          if (reasoningText) {
+            reasoningText.textContent = '';
+          }
+          if (reasoningNote) {
+            reasoningNote.hidden = true;
+          }
+        } else if (reasoningInput.value && reasoningNote) {
+          if (reasoningText) {
+            reasoningText.textContent = reasoningInput.value;
+          }
+          reasoningNote.hidden = false;
+        }
       });
     }
 

@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ file_name }} - DOCX preview</title>
+<style>
+:root {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  padding: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: #1c2430;
+  background: #ffffff;
+  line-height: 1.45;
+}
+
+h1 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.meta {
+  color: #52606d;
+  font-size: 0.78rem;
+  margin: 0 0 10px;
+  overflow-wrap: anywhere;
+}
+
+.notice {
+  border-left: 3px solid #2856a3;
+  background: #f4f7fc;
+  padding: 8px 10px;
+  margin: 0 0 10px;
+  font-size: 0.78rem;
+  color: #1d3f7a;
+}
+
+.error {
+  border-left: 3px solid #b3261e;
+  background: #fdecea;
+  color: #6a1b16;
+}
+
+.image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.image-card {
+  border: 1px solid #dde2e8;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.image-card img {
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
+  display: block;
+}
+
+.image-name {
+  margin-top: 6px;
+  font-size: 0.72rem;
+  color: #52606d;
+  overflow-wrap: anywhere;
+}
+
+p {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.82rem;
+}
+</style>
+</head>
+<body>
+  <h1>{{ file_name }}</h1>
+  <div class="meta">{{ file_path }}</div>
+
+  {% if error_message %}
+  <div class="notice error">{{ error_message }}</div>
+  {% else %}
+  <div class="notice">DOCX is shown as extracted readable content for marking comparison.</div>
+  {% endif %}
+
+  {% if truncated %}
+  <div class="notice">Preview truncated to the first {{ max_paragraphs }} paragraphs.</div>
+  {% endif %}
+
+  {% if images %}
+  <div class="image-grid">
+    {% for image in images %}
+    <div class="image-card">
+      {% if image.content_type.startswith('image/') %}
+      <img src="data:{{ image.content_type }};base64,{{ image.data_base64 }}" alt="{{ image.filename }}">
+      {% endif %}
+      <div class="image-name">{{ image.filename }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if paragraphs %}
+    {% for paragraph in paragraphs %}
+    <p>{{ paragraph }}</p>
+    {% endfor %}
+  {% elif not error_message %}
+  <p>No text content was extracted from this DOCX file.</p>
+  {% endif %}
+</body>
+</html>

@@ -86,6 +86,10 @@ extract answers for marking preview.
 where DOCX answer extraction should run.
 `marking_preview_max_images` is optional and limits how many embedded DOCX images
 are included in the admin marking preview.
+`marking_docx_pdf_converter` controls the PDF preview engine for DOCX files.
+Use `auto` (default), `libreoffice` for a Word-independent conversion path,
+`docx2pdf` if you want to rely on Microsoft Word on macOS, or `dxpdf` if you
+want to use the separate Python library directly.
 Add more areas, change limits, or allow multiple files per area (`max_files > 1`) as needed.
 Restart the app after editing.
 
@@ -100,6 +104,22 @@ The preview shows sequential extracted IDs (`Q1`, `Q2`, ...) and also keeps the
 template order ID (`template Qn`) when they differ. This avoids numbering gaps
 while still showing where each answer came from in the template.
 
+### Submission formatting requirements (recommended)
+
+To improve extraction quality and reduce manual correction during marking,
+students should follow these formatting rules in the report template:
+
+1. Keep each question prompt unchanged.
+2. Start the answer on the next line or in a new paragraph.
+3. Do not merge multiple question answers into one paragraph.
+4. Do not delete question headings.
+5. For image-only questions, add a short text marker such as
+  "See image below".
+
+The parser now tolerates many formatting variations (including prompt and answer
+on one line), but these rules remain the most reliable approach across diverse
+documents.
+
 Embedded images from the DOCX are also extracted (up to the configured max) and
 displayed inline in the same marking preview page.
 Image links shown under each answer are now tied to the question where the image
@@ -110,6 +130,13 @@ The marking preview page supports two review modes:
   submission navigation.
 - **Per question**: one selected question at a time, with previous/next student
   navigation and a question button bar.
+
+Recent UI behavior in marking preview:
+- Split workspace with independent panes (left: marking, right: source document).
+- Draggable divider; pane width is remembered in local storage.
+- PDF is loaded by default when available; DOCX view remains selectable.
+- Header controls stay visible while scrolling the marking pane.
+- Keyboard shortcuts: `p` for previous, `n` for next.
 
 Each answer now includes quick image links; selecting one opens a larger popup
 preview for easier manual marking.
@@ -136,6 +163,25 @@ numbering.
 If `marking_template_docx` is not set, the app attempts auto-discovery using the
 first matching file in `making_template/` or `marking_template/` with pattern
 `marking_template*.docx`.
+
+## Change log
+
+Release notes are tracked in `CHANGELOG.md`.
+
+### TODO (marking workflow improvements)
+
+- Similar-answer checker per question (feasible)
+  - Add a button on the marking page (for each question) such as "Find similar answers".
+  - Compare the current answer against other students' answers for the same question and compute a similarity index.
+  - Show a popup with the top matches (student ID, submission ID, similarity score, and answer snippet/full answer).
+  - Suggested implementation path:
+    - Start with a lightweight local method (for example TF-IDF + cosine similarity) for no external dependency on model APIs.
+    - Optionally add semantic embeddings later for stronger paraphrase detection.
+    - Add a configurable threshold (for example 0.80) and max results count.
+    - Include simple safeguards: normalize whitespace/case and ignore very short answers.
+  - Notes:
+    - This should be a triage aid only, not an automatic misconduct decision.
+    - Manual review remains essential before any academic integrity action.
 
 ## 3. Email (Gmail)
 

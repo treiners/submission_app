@@ -52,10 +52,106 @@
     <h3>Output</h3>
     <pre>{{ run.stdout or '(no output)' }}</pre>
     {% if run.stderr %}<h3>Errors</h3><pre>{{ run.stderr }}</pre>{% endif %}
+    {% set run_files = analysis_text_files_by_run.get(run.id, []) %}
+    {% if run_files %}
+    <div class="analysis-file-links" data-preview-url="{{ url_for('admin_analysis_text_file', submission_id=submission.id, run_id=run.id) }}">
+      <div class="analysis-file-links-title">Run files</div>
+      {% for file in run_files %}
+      <button type="button" class="analysis-file-btn" data-file-path="{{ file.path }}">
+        Open {{ file.name }}
+      </button>
+      {% endfor %}
+      <span class="analysis-file-status" aria-live="polite"></span>
+    </div>
+    {% endif %}
   </div>
   {% else %}
   <div class="card">No analysis runs have been recorded yet.</div>
   {% endfor %}
 </div>
+
+<div id="analysis-file-popup" class="image-popup" aria-hidden="true">
+  <div class="image-popup-inner">
+    <button type="button" class="image-popup-close" id="analysis-file-popup-close">Close</button>
+    <div class="image-popup-title" id="analysis-file-popup-title"></div>
+    <pre id="analysis-file-popup-content"></pre>
+  </div>
+</div>
+
+<script>
+(() => {
+  const popup = document.getElementById('analysis-file-popup');
+  const popupTitle = document.getElementById('analysis-file-popup-title');
+  const popupContent = document.getElementById('analysis-file-popup-content');
+  const closeBtn = document.getElementById('analysis-file-popup-close');
+  const fileButtons = document.querySelectorAll('.analysis-file-btn');
+
+  function closePopup() {
+    popup.setAttribute('aria-hidden', 'true');
+    popupTitle.textContent = '';
+    popupContent.textContent = '';
+  }
+
+  function openPopup(title, content) {
+    popupTitle.textContent = title || '';
+    popupContent.textContent = content || '';
+    popup.setAttribute('aria-hidden', 'false');
+  }
+
+  closeBtn.addEventListener('click', closePopup);
+  popup.addEventListener('click', (event) => {
+    if (event.target === popup) {
+      closePopup();
+    }
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && popup.getAttribute('aria-hidden') === 'false') {
+      closePopup();
+    }
+  });
+
+  fileButtons.forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const container = btn.closest('.analysis-file-links');
+      if (!container) {
+        return;
+      }
+
+      const status = container.querySelector('.analysis-file-status');
+      const previewUrl = container.getAttribute('data-preview-url') || '';
+      const filePath = btn.getAttribute('data-file-path') || '';
+      if (!previewUrl || !filePath) {
+        if (status) {
+          status.textContent = 'File preview is unavailable.';
+        }
+        return;
+      }
+
+      if (status) {
+        status.textContent = 'Opening...';
+      }
+
+      try {
+        const response = await fetch(`${previewUrl}?path=${encodeURIComponent(filePath)}`);
+        const payload = await response.json();
+        if (!response.ok || !payload.ok || !payload.file) {
+          throw new Error(payload.error || 'Could not open this file.');
+        }
+
+        const file = payload.file;
+        const suffix = file.truncated ? ` (first ${file.max_bytes} bytes shown)` : '';
+        openPopup(`${file.name}${suffix}`, file.content || '');
+        if (status) {
+          status.textContent = '';
+        }
+      } catch (error) {
+        if (status) {
+          status.textContent = error.message || 'Could not open this file.';
+        }
+      }
+    });
+  });
+})();
+</script>
 </body>
 </html>
