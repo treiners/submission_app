@@ -17,6 +17,18 @@
           Submission #{{ submission.id }} &middot; {{ submission.name }} &middot; {{ submission.student_id }}
           {% if form_version %}&middot; Form version {{ form_version }}{% endif %}
         </p>
+        <div class="template-mode-row">
+          {% if active_template_status.status == 'active' %}
+          <span class="template-mode-badge active">Template mode: ACTIVE</span>
+          <span class="template-mode-note">{{ active_template_status.question_ids | length }} question(s) loaded from active_template.json.</span>
+          {% elif active_template_status.status == 'partial' %}
+          <span class="template-mode-badge partial">Template mode: PARTIAL</span>
+          <span class="template-mode-note">{{ active_template_status.question_ids | length }} question(s) loaded from active_template.json; warnings present.</span>
+          {% else %}
+          <span class="template-mode-badge fallback">Template mode: FALLBACK</span>
+          <span class="template-mode-note">Using extracted question structure.</span>
+          {% endif %}
+        </div>
         {% if submission_is_excluded %}
         <div class="flash" style="background:#fff5d6; border-left-color:#b08900; color:#5c4300;">
           This submission is currently excluded from marking navigation.
@@ -68,6 +80,12 @@
           {% if messages %}<div class="flash">{{ messages[-1] }}</div>{% endif %}
         {% endwith %}
 
+        {% if active_template_status.warning %}
+        <div class="flash" style="background:#fff5d6; border-left-color:#b08900; color:#5c4300; margin-top:8px;">
+          {{ active_template_status.warning }}
+        </div>
+        {% endif %}
+
         <div class="marking-toolbar">
           <form method="GET" action="{{ url_for('admin_submission_marking', submission_id=submission.id) }}">
             <input type="hidden" name="view" value="student">
@@ -101,170 +119,143 @@
   {% if view_mode == 'student' %}
   {% if student_all_marked %}
   <div class="card">All marked. No submissions currently need marking.</div>
-  {% else %}
-  {% for preview in previews %}
-  <div class="preview-file-summary">
-    <h2>{{ preview.file }}</h2>
-    {% if preview.data.status == 'ok' %}
-    <p>
-      {{ preview.data.answer_count }} extracted answer(s)
-      {% if preview.data.image_count %}&middot; {{ preview.data.image_count }} extracted image(s){% endif %}
-    </p>
-    {% endif %}
-  </div>
-    {% if preview.data.status == 'ok' %}
-      {% for answer in preview.data.answers %}
-      <div class="card metadata-card question-card">
-      <h3>
-        {{ answer.question_id }}
-        {% if answer.template_question_id and answer.template_question_id != answer.question_id %}
-          (template {{ answer.template_question_id }})
-        {% endif %}
-        {% if answer.marks_label %}<span class="marks-badge">{{ answer.marks_label }}</span>{% endif %}
-        &middot; {{ answer.prompt }}
-      </h3>
-      {% if answer.confidence %}
-      <div class="confidence-row">
-        <span class="confidence-pill {{ answer.confidence.level }}">Confidence {{ answer.confidence.level }} ({{ answer.confidence.score }})</span>
-        {% if answer.confidence.reasons %}
-          <span class="confidence-note">{{ answer.confidence.reasons | join(' ') }}</span>
-        {% endif %}
-      </div>
+  {% elif student_question_entries %}
+  {% for entry in student_question_entries %}
+  {% set answer = entry.answer %}
+  <div class="card metadata-card question-card">
+    <h3>
+      {{ answer.question_id }}:
+      {% if answer.template_question_id and answer.template_question_id != answer.question_id %}
+        (template {{ answer.template_question_id }})
       {% endif %}
-      <pre>{{ answer.answer }}</pre>
-
-      <form method="POST"
-        action="{{ url_for('admin_save_marking_assessment', submission_id=submission.id) }}"
-        class="assessment-form"
-        data-suggest-url="{{ url_for('admin_marking_ai_suggest', submission_id=submission.id) }}">
-        <input type="hidden" name="question_id" value="{{ answer.question_id }}">
-        <input type="hidden" name="view" value="student">
-        <input type="hidden" name="unmarked" value="{{ '1' if show_only_unmarked else '0' }}">
-        <input type="hidden" name="question_prompt" value="{{ answer.prompt }}">
-        <input type="hidden" name="student_answer" value="{{ answer.answer }}">
-        <input type="hidden" name="marks_label" value="{{ answer.marks_label or '' }}">
-        <input type="hidden" name="ai_draft_used" value="false">
-        <input type="hidden" name="ai_reasoning" value="{{ assessments.get(answer.question_id, {}).get('ai_reasoning', '') }}">
-        <div class="assessment-grid">
-          <label>Score
-            <input type="text" name="score" value="{{ assessments.get(answer.question_id, {}).get('score', '') }}" placeholder="e.g. 4/5">
-          </label>
-          <label>Comment
-            <textarea name="comment" rows="3" class="autosize" placeholder="Marker notes">{{ assessments.get(answer.question_id, {}).get('comment', '') }}</textarea>
-          </label>
-        </div>
-        <div class="assessment-meta-row">
-          <label class="marking-source-label">Source
-            {% set source_value = assessments.get(answer.question_id, {}).get('comment_source', 'human') %}
-            <select name="comment_source" class="marking-source-select">
-              <option value="ai" {% if source_value == 'ai' %}selected{% endif %}>AI generated</option>
-              <option value="ai_human_approved" {% if source_value == 'ai_human_approved' %}selected{% endif %}>AI generated and approved by human</option>
-              <option value="human" {% if source_value == 'human' %}selected{% endif %}>Human</option>
-            </select>
-          </label>
-          <label class="eval-case-toggle">
-            <input type="checkbox" name="include_eval_case" value="true" {% if eval_candidates.get(answer.question_id, {}).get('include_in_eval') %}checked{% endif %}>
-            Use this manual marking as an AI evaluation example
-          </label>
-        </div>
-        <div class="ai-reasoning-note" {% if not assessments.get(answer.question_id, {}).get('ai_reasoning') %}hidden{% endif %}>
-          <strong>AI reasoning:</strong>
-          <span class="ai-reasoning-text">{{ assessments.get(answer.question_id, {}).get('ai_reasoning', '') }}</span>
-        </div>
-        {% if eval_candidates.get(answer.question_id) %}
-        <div class="eval-case-meta">
-          Candidate saved &middot; include={{ 'yes' if eval_candidates.get(answer.question_id, {}).get('include_in_eval') else 'no' }}
-        </div>
-        {% endif %}
-        {% if answer.images or marking_text_files %}
-        <div class="inline-resource-tools" data-text-preview-url="{{ url_for('admin_marking_text_file', submission_id=marking_text_submission_id) }}">
-          {% if answer.images %}
-          <div class="inline-image-links">
-            {% for image in answer.images %}
-            <button type="button"
-                    class="inline-image-link"
-                    data-popup-src="data:{{ image.content_type }};base64,{{ image.data_base64 }}"
-                    data-popup-title="{{ image.filename }}">
-              Open image {{ image.filename }}
-            </button>
-            {% endfor %}
-          </div>
-          {% endif %}
-          {% if marking_text_files %}
-          <div class="inline-file-viewer">
-            <label class="inline-file-label">View file</label>
-            <select class="text-file-select">
-              {% for text_file in marking_text_files %}
-              <option value="{{ text_file.path }}">{{ text_file.label }}</option>
-              {% endfor %}
-            </select>
-            <button type="button" class="inline-file-open-btn">Open</button>
-            <span class="inline-file-status" aria-live="polite"></span>
-          </div>
-          {% endif %}
-        </div>
-        {% endif %}
-        <div class="assessment-actions">
-          {% set existing_assessment = assessments.get(answer.question_id, {}) %}
-          <button type="submit" class="primary save-marking-btn{% if existing_assessment.get('updated_at') %} saved{% endif %}">Save marking</button>
-          <button type="submit"
-                  class="marking-ai-btn secondary"
-                  formaction="{{ url_for('admin_undo_marking_assessment', submission_id=submission.id) }}"
-                  formmethod="post"
-                  formnovalidate
-                  onclick="return confirm('Undo marking for {{ answer.question_id }}?');">Undo marking</button>
-          <span class="save-marking-status" aria-live="polite"></span>
-          <button type="button" class="marking-ai-btn marking-ai-apply-btn">
-            Apply AI draft
-          </button>
-          <button type="button" class="marking-ai-btn marking-ai-redo-btn secondary">
-            Redo AI draft
-          </button>
-          <span class="marking-ai-status" aria-live="polite"></span>
-        </div>
-        <div class="ai-draft-preview" hidden>
-          <div class="ai-draft-preview-title">AI draft preview</div>
-          <div class="ai-draft-state" data-state="preview">Preview only</div>
-          <div class="ai-draft-preview-row"><strong>Score:</strong> <span class="ai-preview-score">-</span></div>
-          <div class="ai-draft-preview-row"><strong>Comment:</strong> <span class="ai-preview-comment">-</span></div>
-          <div class="ai-draft-preview-row"><strong>Rationale:</strong> <span class="ai-preview-rationale">-</span></div>
-        </div>
-      </form>
-      </div>
-      {% endfor %}
-
-      {% if preview.data.images %}
-      <div class="card metadata-card extracted-images-card">
-      <h3>Extracted images</h3>
-      <div class="marking-images">
-        {% for image in preview.data.images %}
-        <div class="marking-image-card">
-          <div class="marking-image-meta">{{ image.filename }} &middot; {{ (image.size_bytes / 1024) | round(1) }} KB</div>
-          {% if image.content_type.startswith('image/') %}
-          <img src="data:{{ image.content_type }};base64,{{ image.data_base64 }}" alt="{{ image.filename }}">
-          {% else %}
-          <pre>Unsupported preview content type: {{ image.content_type }}</pre>
-          {% endif %}
-        </div>
-        {% endfor %}
-      </div>
-      </div>
-      {% endif %}
-
-      {% if preview.data.unmatched_insertions %}
-      <h3>Unmatched insertions</h3>
-      {% for unmatched in preview.data.unmatched_insertions %}
-      <pre>{{ unmatched }}</pre>
-      {% endfor %}
-      {% endif %}
+      <span class="question-title-inline">{{ answer.template_prompt or answer.prompt }}</span>
+      {% if answer.marks_label %}<span class="marks-badge">{{ answer.marks_label }}</span>{% endif %}
+    </h3>
+    {% if answer.template_prompt and answer.extracted_prompt and answer.template_prompt != answer.extracted_prompt %}
+    <p class="subtitle" style="margin:0 0 6px; font-size:0.82rem;"><strong>Template prompt:</strong> {{ answer.template_prompt }}</p>
+    <p class="subtitle" style="margin:0 0 10px; font-size:0.82rem;"><strong>Extracted prompt:</strong> {{ answer.extracted_prompt }}</p>
     {% else %}
-      <div class="error-box" style="margin: 0;">
-        {{ preview.data.reason or 'No extraction result is available for this file.' }}
-      </div>
+    <p class="subtitle" style="margin:0 0 10px; font-size:0.82rem;"><strong>Prompt:</strong> {{ answer.prompt }}</p>
     {% endif %}
+    {% if answer.confidence %}
+    <div class="confidence-row">
+      <span class="confidence-pill {{ answer.confidence.level }}">Confidence {{ answer.confidence.level }} ({{ answer.confidence.score }})</span>
+      {% if answer.confidence.reasons %}
+        <span class="confidence-note">{{ answer.confidence.reasons | join(' ') }}</span>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="answer-boundary-note">
+      Answer is shown between <span class="answer-boundary-tag">[{{ answer.question_id }} ..]</span>
+      and <span class="answer-boundary-tag">[{{ answer.question_id }} END]</span>.
+    </div>
+    {% if answer.answer %}
+    <pre>{{ answer.answer }}</pre>
+    {% else %}
+    <pre>No extracted answer found for this question.</pre>
+    {% endif %}
+
+    <form method="POST"
+      action="{{ url_for('admin_save_marking_assessment', submission_id=submission.id) }}"
+      class="assessment-form"
+      data-suggest-url="{{ url_for('admin_marking_ai_suggest', submission_id=submission.id) }}">
+      <input type="hidden" name="question_id" value="{{ answer.question_id }}">
+      <input type="hidden" name="view" value="student">
+      <input type="hidden" name="unmarked" value="{{ '1' if show_only_unmarked else '0' }}">
+      <input type="hidden" name="question_prompt" value="{{ answer.template_prompt or answer.prompt }}">
+      <input type="hidden" name="student_answer" value="{{ answer.answer }}">
+      <input type="hidden" name="marks_label" value="{{ answer.marks_label or '' }}">
+      <input type="hidden" name="ai_draft_used" value="false">
+      <input type="hidden" name="ai_reasoning" value="{{ entry.assessment.get('ai_reasoning', '') }}">
+      <div class="assessment-grid">
+        <label>Score
+          <input type="text" name="score" value="{{ entry.assessment.get('score', answer.max_score if answer.max_score is not none else '') }}" placeholder="e.g. 4/5">
+        </label>
+        <label>Comment
+          <textarea name="comment" rows="3" class="autosize" placeholder="Marker notes">{{ entry.assessment.get('comment', '') }}</textarea>
+        </label>
+      </div>
+      <div class="assessment-meta-row">
+        <label class="marking-source-label">Source
+          {% set source_value = entry.assessment.get('comment_source', 'human') %}
+          <select name="comment_source" class="marking-source-select">
+            <option value="ai" {% if source_value == 'ai' %}selected{% endif %}>AI generated</option>
+            <option value="ai_human_approved" {% if source_value == 'ai_human_approved' %}selected{% endif %}>AI generated and approved by human</option>
+            <option value="human" {% if source_value == 'human' %}selected{% endif %}>Human</option>
+          </select>
+        </label>
+        <label class="eval-case-toggle">
+          <input type="checkbox" name="include_eval_case" value="true" {% if entry.eval_candidate.get('include_in_eval') %}checked{% endif %}>
+          Use this manual marking as an AI evaluation example
+        </label>
+      </div>
+      <div class="ai-reasoning-note" {% if not entry.assessment.get('ai_reasoning') %}hidden{% endif %}>
+        <strong>AI reasoning:</strong>
+        <span class="ai-reasoning-text">{{ entry.assessment.get('ai_reasoning', '') }}</span>
+      </div>
+      {% if entry.eval_candidate %}
+      <div class="eval-case-meta">
+        Candidate saved &middot; include={{ 'yes' if entry.eval_candidate.get('include_in_eval') else 'no' }}
+      </div>
+      {% endif %}
+      {% if answer.images or marking_text_files %}
+      <div class="inline-resource-tools" data-text-preview-url="{{ url_for('admin_marking_text_file', submission_id=marking_text_submission_id) }}">
+        {% if answer.images %}
+        <div class="inline-image-links">
+          {% for image in answer.images %}
+          <button type="button"
+                  class="inline-image-link"
+                  data-popup-src="data:{{ image.content_type }};base64,{{ image.data_base64 }}"
+                  data-popup-title="{{ image.filename }}">
+            Open image {{ image.filename }}
+          </button>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if marking_text_files %}
+        <div class="inline-file-viewer">
+          <label class="inline-file-label">View file</label>
+          <select class="text-file-select">
+            {% for text_file in marking_text_files %}
+            <option value="{{ text_file.path }}">{{ text_file.label }}</option>
+            {% endfor %}
+          </select>
+          <button type="button" class="inline-file-open-btn">Open</button>
+          <span class="inline-file-status" aria-live="polite"></span>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+      <div class="assessment-actions">
+        <button type="submit" class="primary save-marking-btn{% if entry.assessment.get('updated_at') %} saved{% endif %}">Save marking</button>
+        <button type="submit"
+                class="marking-ai-btn secondary"
+                formaction="{{ url_for('admin_undo_marking_assessment', submission_id=submission.id) }}"
+                formmethod="post"
+                formnovalidate
+                onclick="return confirm('Undo marking for {{ answer.question_id }}?');">Undo marking</button>
+        <span class="save-marking-status" aria-live="polite"></span>
+        <button type="button" class="marking-ai-btn marking-ai-apply-btn">
+          Apply AI draft
+        </button>
+        <button type="button" class="marking-ai-btn marking-ai-redo-btn secondary">
+          Redo AI draft
+        </button>
+        <span class="marking-ai-status" aria-live="polite"></span>
+      </div>
+      <div class="ai-draft-preview" hidden>
+        <div class="ai-draft-preview-title">AI draft preview</div>
+        <div class="ai-draft-state" data-state="preview">Preview only</div>
+        <div class="ai-draft-preview-row"><strong>Score:</strong> <span class="ai-preview-score">-</span></div>
+        <div class="ai-draft-preview-row"><strong>Comment:</strong> <span class="ai-preview-comment">-</span></div>
+        <div class="ai-draft-preview-row"><strong>Rationale:</strong> <span class="ai-preview-rationale">-</span></div>
+      </div>
+    </form>
+  </div>
+  {% endfor %}
   {% else %}
   <div class="card">No marking preview output was found for this submission.</div>
-  {% endfor %}
   {% endif %}
   {% else %}
   <div class="card metadata-card question-card">
@@ -292,13 +283,19 @@
     </div>
 
     <h3>
-      {{ question_entry.answer.question_id }}
+      {{ question_entry.answer.question_id }}:
       {% if question_entry.answer.template_question_id and question_entry.answer.template_question_id != question_entry.answer.question_id %}
         (template {{ question_entry.answer.template_question_id }})
       {% endif %}
+      <span class="question-title-inline">{{ question_entry.answer.template_prompt or question_entry.answer.prompt }}</span>
       {% if question_entry.answer.marks_label %}<span class="marks-badge">{{ question_entry.answer.marks_label }}</span>{% endif %}
-      &middot; {{ question_entry.answer.prompt }}
     </h3>
+    {% if question_entry.answer.template_prompt and question_entry.answer.extracted_prompt and question_entry.answer.template_prompt != question_entry.answer.extracted_prompt %}
+    <p class="subtitle" style="margin:0 0 6px; font-size:0.82rem;"><strong>Template prompt:</strong> {{ question_entry.answer.template_prompt }}</p>
+    <p class="subtitle" style="margin:0 0 10px; font-size:0.82rem;"><strong>Extracted prompt:</strong> {{ question_entry.answer.extracted_prompt }}</p>
+    {% else %}
+    <p class="subtitle" style="margin:0 0 10px; font-size:0.82rem;"><strong>Prompt:</strong> {{ question_entry.answer.prompt }}</p>
+    {% endif %}
     {% if question_entry.answer.confidence %}
     <div class="confidence-row">
       <span class="confidence-pill {{ question_entry.answer.confidence.level }}">Confidence {{ question_entry.answer.confidence.level }} ({{ question_entry.answer.confidence.score }})</span>
@@ -307,7 +304,15 @@
       {% endif %}
     </div>
     {% endif %}
+    <div class="answer-boundary-note">
+      Answer is shown between <span class="answer-boundary-tag">[{{ question_entry.answer.question_id }} ..]</span>
+      and <span class="answer-boundary-tag">[{{ question_entry.answer.question_id }} END]</span>.
+    </div>
+    {% if question_entry.answer.answer %}
     <pre>{{ question_entry.answer.answer }}</pre>
+    {% else %}
+    <pre>No extracted answer found for this question.</pre>
+    {% endif %}
 
         <form method="POST"
           action="{{ url_for('admin_save_marking_assessment', submission_id=question_entry.submission_id) }}"
@@ -317,14 +322,14 @@
       <input type="hidden" name="view" value="question">
       <input type="hidden" name="unmarked" value="{{ '1' if show_only_unmarked else '0' }}">
       <input type="hidden" name="selected_question" value="{{ selected_question }}">
-      <input type="hidden" name="question_prompt" value="{{ question_entry.answer.prompt }}">
+      <input type="hidden" name="question_prompt" value="{{ question_entry.answer.template_prompt or question_entry.answer.prompt }}">
       <input type="hidden" name="student_answer" value="{{ question_entry.answer.answer }}">
       <input type="hidden" name="marks_label" value="{{ question_entry.answer.marks_label or '' }}">
       <input type="hidden" name="ai_draft_used" value="false">
       <input type="hidden" name="ai_reasoning" value="{{ question_entry.assessment.get('ai_reasoning', '') }}">
       <div class="assessment-grid">
         <label>Score
-          <input type="text" name="score" value="{{ question_entry.assessment.get('score', '') }}" placeholder="e.g. 4/5">
+          <input type="text" name="score" value="{{ question_entry.assessment.get('score', question_entry.answer.max_score if question_entry.answer.max_score is not none else '') }}" placeholder="e.g. 4/5">
         </label>
         <label>Comment
           <textarea name="comment" rows="3" class="autosize" placeholder="Marker notes">{{ question_entry.assessment.get('comment', '') }}</textarea>
@@ -407,7 +412,7 @@
       </div>
     </form>
     {% else %}
-    <div class="error-box" style="margin:0;">No answer found for this question yet.</div>
+    <div class="error-box" style="margin:0;">No submissions found for this question in the current filter.</div>
     {% endif %}
   </div>
   {% endif %}
@@ -423,7 +428,7 @@
         <div class="marking-doc-controls">
           <select id="marking-doc-select" aria-label="Select submission document for preview">
             {% for document in marking_document_options %}
-            <option value="{{ document.path }}" data-mode="{{ document.mode }}">{{ document.label }}</option>
+            <option value="{{ document.path }}" data-mode="{{ document.mode }}" {% if document.selected %}selected{% endif %}>{{ document.label }}</option>
             {% endfor %}
           </select>
           <button type="button" id="marking-doc-open-btn" class="marking-ai-btn secondary">Open</button>
@@ -433,7 +438,7 @@
           <iframe id="marking-doc-frame" title="Original submission preview"></iframe>
         </div>
         <p class="hint" style="margin-top:10px;">
-          PDF is shown by default. Choose DOCX view from the selector when needed.
+          PDF is shown by default. Choose DOCX view or Video playback from the selector when needed.
         </p>
         {% else %}
         <p class="subtitle" style="margin:0; font-size:0.84rem;">

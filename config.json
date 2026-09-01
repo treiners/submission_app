@@ -1,9 +1,9 @@
 {
   "assignment_title": "MATH5007 Assignment Submission A1P1",
-  "form_version": "1.3.1",
-  "marking_template_docx": "making_template/marking_template_MATH5007_A1P1_2026_S2.docx",
+  "form_version": "1.4.0",
+  "marking_template_docx": "marking_template/marking_template_MATH5007_A1P1_2026_S2.docx",
   "marking_extraction_areas": ["report"],
-  "marking_docx_pdf_converter": "auto",
+  "marking_docx_pdf_converter": "dxpdf",
   "areas": [
     {
       "key": "report",
@@ -14,9 +14,19 @@
       "max_files": 1
     },
     {
+      "key": "video_submission",
+      "label": "Video Submission",
+      "instruction": "Upload up to 3 video files for Question 1.",
+      "questions": [1],
+      "allowed_extensions": [".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".wmv"],
+      "max_size_mb": 400,
+      "max_files": 3
+    },
+    {
       "key": "ampl_code",
       "label": "AMPL Code",
       "instruction": "Upload a single ZIP containing your AMPL .mod/.dat/.run files. If you have multiple models, please include them all in the ZIP. Ensure that your main model file is named 'model.mod' and your data file is named 'data.dat'.",
+      "questions": [2],
       "allowed_extensions": [".zip"],
       "max_size_mb": 10,
       "max_files": 1

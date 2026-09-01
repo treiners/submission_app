@@ -20,8 +20,49 @@
   </div>
 
   {% with messages = get_flashed_messages() %}
-    {% if messages %}<div class="flash">{{ messages[-1] }}</div>{% endif %}
+    {% if messages %}
+      {% for msg in messages %}
+      <div class="flash">{{ msg }}</div>
+      {% endfor %}
+    {% endif %}
   {% endwith %}
+
+  {% if template_upload_errors %}
+  <div class="flash" style="background:#fff1f1; border-color:#e9b5b5; color:#8b1f1f;">
+    <strong>Template upload blocked.</strong>
+    <ul style="margin:8px 0 0 18px; padding:0;">
+      {% for err in template_upload_errors %}
+      <li>{{ err }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if submissions | length == 0 %}
+  <div class="card" style="margin:0 0 14px; padding:16px 18px;">
+    <h2 style="margin:0 0 8px; font-size:1rem;">Template setup</h2>
+    <p class="subtitle" style="margin:0 0 10px;">
+      No submissions yet. Upload one worksheet template DOCX to generate
+      <strong>active_template.json</strong> from strict question markers.
+    </p>
+    <form method="POST" action="{{ url_for('admin_template_upload') }}" enctype="multipart/form-data" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <input type="file" name="template_docx" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required>
+      <button type="submit" class="primary" style="width:auto; padding:9px 14px;">Upload template</button>
+    </form>
+    <p class="subtitle" style="margin:10px 0 0; font-size:0.8rem;">
+      Required markers: <strong>[Q1: QUESTION M:6]</strong> ... <strong>[Q1: END]</strong>.
+      Upload is blocked when markers are invalid.
+    </p>
+    {% if active_template_docx_exists or active_template_json_exists %}
+    <p class="subtitle" style="margin:8px 0 0; font-size:0.8rem;">
+      Active files:
+      {% if active_template_docx_exists %}{{ active_template_docx_name }}{% else %}(no active_template.docx){% endif %}
+      &middot;
+      {% if active_template_json_exists %}{{ active_template_json_name }}{% else %}(no active_template.json){% endif %}
+    </p>
+    {% endif %}
+  </div>
+  {% endif %}
 
   <form class="search-bar" method="GET">
     <input type="text" name="q" placeholder="Search by name, student ID, or code" value="{{ search }}">
@@ -38,6 +79,19 @@
   <p class="subtitle" style="margin:0 0 12px 0;">
     Marking pool: {{ included_count }} included &middot; {{ excluded_count }} excluded
   </p>
+
+  <div class="card" style="margin:0 0 14px; padding:14px 16px;">
+    <h2 style="margin:0 0 8px; font-size:0.98rem;">Active marking template</h2>
+    <p class="subtitle" style="margin:0;">
+      DOCX: {% if active_template_docx_exists %}{{ active_template_docx_name }}{% else %}missing{% endif %}
+      &middot; JSON: {% if active_template_json_exists %}{{ active_template_json_name }}{% else %}missing{% endif %}
+      &middot; Questions: {{ active_template_question_count }}
+      &middot; Status: {{ active_template_status }}
+    </p>
+    {% if active_template_warning %}
+    <p class="subtitle" style="margin:8px 0 0; color:#7a5a00;">{{ active_template_warning }}</p>
+    {% endif %}
+  </div>
 
   <div class="admin-action-row" style="margin-top:0; margin-bottom:10px;">
     <a class="action-btn" href="{{ url_for('admin_export_marking_overview_xlsx') }}">Download marking (Excel, included only)</a>

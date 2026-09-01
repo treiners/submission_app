@@ -10,7 +10,7 @@ Use this checklist when moving from one assignment cohort to the next.
 
 ## Update For New Cohort
 
-1. Replace the marking template DOCX in `making_template/`.
+1. Replace the marking template DOCX in `marking_template/`.
 2. Update `config.json`:
 - `assignment_title`
 - `form_version`

@@ -1,10 +1,111 @@
 import unittest
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 from src import metadata
 
 
 class MetadataExtractionTests(unittest.TestCase):
+    def test_strip_submission_markers_removes_tag_lines(self):
+        paragraphs = [
+            "[Q2:  ]",
+            "First real answer paragraph.",
+            "[Q2 END]",
+            "[Q3: Some prompt text] extra trailing text",
+        ]
+
+        cleaned = metadata._strip_submission_markers(paragraphs)
+
+        self.assertEqual(
+            [
+                "First real answer paragraph.",
+                "extra trailing text",
+            ],
+            cleaned,
+        )
+
+    def test_attach_images_uses_submission_markers_only(self):
+        answers = [
+            {"question_id": "Q2", "prompt": "Question 2", "images": []},
+            {"question_id": "Q3", "prompt": "Question 3", "images": []},
+            {"question_id": "Q4", "prompt": "Question 4", "images": []},
+        ]
+        images = [{"filename": "image1.png"}]
+        records = [
+            {"text": "[Q2:  ]", "images": []},
+            {"text": "Figure shown here", "images": ["image1.png"]},
+            {"text": "[Q4:  ]", "images": []},
+        ]
+
+        with patch("src.metadata._docx_paragraph_records", return_value=records):
+            metadata._attach_images_to_answers("submission.docx", answers, images)
+
+        self.assertEqual(["image1.png"], [item["filename"] for item in answers[0]["images"]])
+        self.assertEqual([], answers[1]["images"])
+        self.assertEqual([], answers[2]["images"])
+
+    def test_attach_images_leaves_tagless_sections_unassigned(self):
+        answers = [
+            {"question_id": "Q2", "prompt": "Question 2", "images": []},
+            {"question_id": "Q3", "prompt": "Question 3", "images": []},
+        ]
+        images = [{"filename": "image1.png"}]
+        records = [
+            {"text": "Question 2", "images": []},
+            {"text": "Figure shown here", "images": ["image1.png"]},
+            {"text": "Question 3", "images": []},
+        ]
+
+        with patch("src.metadata._docx_paragraph_records", return_value=records):
+            metadata._attach_images_to_answers("submission.docx", answers, images)
+
+        self.assertEqual([], answers[0]["images"])
+        self.assertEqual([], answers[1]["images"])
+
+    def test_resolve_template_prefers_active_template_docx(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "marking_template").mkdir(parents=True, exist_ok=True)
+            active = root / "marking_template" / "active_template.docx"
+            active.write_bytes(b"active")
+
+            configured = root / "marking_template" / "marking_template_configured.docx"
+            configured.write_bytes(b"configured")
+
+            resolved = metadata.resolve_marking_template_docx(
+                root,
+                {"marking_template_docx": str(configured)},
+            )
+
+            self.assertEqual(active, resolved)
+
+    def test_resolve_template_uses_configured_path_when_active_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            (root / "marking_template").mkdir(parents=True, exist_ok=True)
+            configured = root / "marking_template" / "marking_template_configured.docx"
+            configured.write_bytes(b"configured")
+
+            resolved = metadata.resolve_marking_template_docx(
+                root,
+                {"marking_template_docx": "marking_template/marking_template_configured.docx"},
+            )
+
+            self.assertEqual(configured, resolved)
+
+    def test_resolve_template_falls_back_to_marking_template_pattern(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            folder = root / "marking_template"
+            folder.mkdir(parents=True, exist_ok=True)
+            fallback = folder / "marking_template_v1.docx"
+            fallback.write_bytes(b"fallback")
+
+            resolved = metadata.resolve_marking_template_docx(root, {})
+
+            self.assertEqual(fallback, resolved)
+
     def test_inline_prompt_answer_lines_are_split_per_question(self):
         q1_prompt = "Please mention the enrolled course and if you take the unit as a mandatory or elective one (2M)."
         q2_prompt = "This question is about your expectations on what you learn in this unit and if it helps to secure later an industry position(5M)"

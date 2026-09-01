@@ -156,12 +156,14 @@
     e.preventDefault();
     clearErrors();
 
-    const name = document.getElementById("name").value.trim();
+    const firstName = document.getElementById("first_name").value.trim();
+    const lastName = document.getElementById("last_name").value.trim();
     const studentId = document.getElementById("student_id").value.trim();
     const email = document.getElementById("email").value.trim();
 
     const errors = [];
-    if (!name) errors.push("Name is required.");
+    if (!firstName) errors.push("First name is required.");
+    if (!lastName) errors.push("Last name is required.");
     if (!studentId) errors.push("Student ID is required.");
     if (!email) errors.push("Email is required.");
     areas.forEach(area => {
@@ -174,7 +176,8 @@
     if (errors.length) { showErrors(errors); return; }
 
     const formData = new FormData();
-    formData.append("name", name);
+    formData.append("first_name", firstName);
+    formData.append("last_name", lastName);
     formData.append("student_id", studentId);
     formData.append("email", email);
     areas.forEach(area => {

@@ -1,0 +1,122 @@
+{
+  "template": {
+    "source_docx": "/var/folders/pd/2yflrv2s097dmvs3jfgj2mf00000gr/T/tmp00qn86ki/template_A1P2.docx",
+    "generated_at": "2026-09-01T05:10:00.440183+00:00",
+    "marker_format": "[Qx: inline prompt M:n] ... [Qx END]",
+    "line_count": 47,
+    "question_count": 6
+  },
+  "questions": [
+    {
+      "question_id": "Q1",
+      "question_prompt": "If you used ECHO or your own file server, please leave the link here.",
+      "max_score": 0
+    },
+    {
+      "question_id": "Q3",
+      "question_prompt": "Introduce yourself (name, course).",
+      "max_score": 2
+    },
+    {
+      "question_id": "Q4",
+      "question_prompt": "How did you record the video?",
+      "max_score": 2
+    },
+    {
+      "question_id": "Q5",
+      "question_prompt": "How do you (personally) learn and practice AMPL?",
+      "max_score": 6
+    },
+    {
+      "question_id": "Q6",
+      "question_prompt": "Explain the constraint from the concrete example for Company 1. Do not read it, explain how it is working).",
+      "max_score": 10
+    },
+    {
+      "question_id": "Q2",
+      "question_prompt": "Solve the GreenCart problem with AMPL. State the answer to the problem here; feel free to add additional information if required. Remember to comment the AMPL files.",
+      "max_score": 20
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "template_q1",
+      "question_id": "Q1",
+      "question_prompt": "If you used ECHO or your own file server, please leave the link here.",
+      "student_answer": "",
+      "max_score": 0,
+      "reference_score": "",
+      "reference_minimum_requirements_met": false,
+      "reference_comment": "",
+      "reference_strengths": [],
+      "reference_gaps": [],
+      "notes_for_edge_cases": "Generated from marker template for Q1."
+    },
+    {
+      "case_id": "template_q3",
+      "question_id": "Q3",
+      "question_prompt": "Introduce yourself (name, course).",
+      "student_answer": "",
+      "max_score": 2,
+      "reference_score": "",
+      "reference_minimum_requirements_met": false,
+      "reference_comment": "",
+      "reference_strengths": [],
+      "reference_gaps": [],
+      "notes_for_edge_cases": "Generated from marker template for Q3."
+    },
+    {
+      "case_id": "template_q4",
+      "question_id": "Q4",
+      "question_prompt": "How did you record the video?",
+      "student_answer": "",
+      "max_score": 2,
+      "reference_score": "",
+      "reference_minimum_requirements_met": false,
+      "reference_comment": "",
+      "reference_strengths": [],
+      "reference_gaps": [],
+      "notes_for_edge_cases": "Generated from marker template for Q4."
+    },
+    {
+      "case_id": "template_q5",
+      "question_id": "Q5",
+      "question_prompt": "How do you (personally) learn and practice AMPL?",
+      "student_answer": "",
+      "max_score": 6,
+      "reference_score": "",
+      "reference_minimum_requirements_met": false,
+      "reference_comment": "",
+      "reference_strengths": [],
+      "reference_gaps": [],
+      "notes_for_edge_cases": "Generated from marker template for Q5."
+    },
+    {
+      "case_id": "template_q6",
+      "question_id": "Q6",
+      "question_prompt": "Explain the constraint from the concrete example for Company 1. Do not read it, explain how it is working).",
+      "student_answer": "",
+      "max_score": 10,
+      "reference_score": "",
+      "reference_minimum_requirements_met": false,
+      "reference_comment": "",
+      "reference_strengths": [],
+      "reference_gaps": [],
+      "notes_for_edge_cases": "Generated from marker template for Q6."
+    },
+    {
+      "case_id": "template_q2",
+      "question_id": "Q2",
+      "question_prompt": "Solve the GreenCart problem with AMPL. State the answer to the problem here; feel free to add additional information if required. Remember to comment the AMPL files.",
+      "student_answer": "",
+      "max_score": 20,
+      "reference_score": "",
+      "reference_minimum_requirements_met": false,
+      "reference_comment": "",
+      "reference_strengths": [],
+      "reference_gaps": [],
+      "notes_for_edge_cases": "Generated from marker template for Q2."
+    }
+  ],
+  "errors": []
+}

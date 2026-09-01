@@ -53,8 +53,8 @@ Edit `config.json` — no code changes needed:
 ```json
 {
   "assignment_title": "Assignment 1 Submission",
-  "form_version": "0.9.1",
-  "marking_template_docx": "making_template/marking_template_MATH5007_A1P1_2026_S2.docx",
+  "form_version": "1.4.0",
+  "marking_template_docx": "marking_template/marking_template_MATH5007_A1P1_2026_S2.docx",
   "marking_extraction_areas": ["report"],
   "marking_preview_max_images": 12,
   "areas": [
@@ -67,9 +67,19 @@ Edit `config.json` — no code changes needed:
       "max_files": 1
     },
     {
+      "key": "video_submission",
+      "label": "Video Submission",
+      "instruction": "Upload up to 3 video files for Question 1.",
+      "questions": [1],
+      "allowed_extensions": [".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".wmv"],
+      "max_size_mb": 400,
+      "max_files": 3
+    },
+    {
       "key": "ampl_code",
       "label": "AMPL Code",
       "instruction": "Upload a single ZIP containing your AMPL .mod/.dat/.run files.",
+      "questions": [2],
       "allowed_extensions": [".zip"],
       "max_size_mb": 10,
       "max_files": 1
@@ -80,6 +90,8 @@ Edit `config.json` — no code changes needed:
 `instruction` is optional and appears between the area label and upload box.
 `form_version` is optional and appears at the very bottom of the public form page,
 and also in admin page headers for quick confirmation of the live config.
+Public submission now collects first and last name separately and stores a
+single concatenated `name` for display/search/export compatibility.
 `marking_template_docx` is optional and points to the DOCX template used to
 extract answers for marking preview.
 `marking_extraction_areas` is optional and lists area keys (for example `report`)
@@ -90,6 +102,10 @@ are included in the admin marking preview.
 Use `auto` (default), `libreoffice` for a Word-independent conversion path,
 `docx2pdf` if you want to rely on Microsoft Word on macOS, or `dxpdf` if you
 want to use the separate Python library directly.
+Each area can optionally define a question scope using `questions` (preferred)
+or `question` (accepted for compatibility). Values can be `2`, `"2"`, `"Q2"`,
+or a list such as `[2, "Q3"]`. If this field is missing, the area is available
+to all questions.
 Add more areas, change limits, or allow multiple files per area (`max_files > 1`) as needed.
 Restart the app after editing.
 
@@ -134,9 +150,11 @@ The marking preview page supports two review modes:
 Recent UI behavior in marking preview:
 - Split workspace with independent panes (left: marking, right: source document).
 - Draggable divider; pane width is remembered in local storage.
-- PDF is loaded by default when available; DOCX view remains selectable.
+- Report/PDF is loaded by default when available; DOCX view and video playback remain selectable.
 - Header controls stay visible while scrolling the marking pane.
 - Keyboard shortcuts: `p` for previous, `n` for next.
+- Question headers show the question number and prompt inline, with the template prompt still shown below for comparison.
+- Answer text is displayed without marker tags such as `[Q3 ...]` / `[Q3 END]`.
 
 Each answer now includes quick image links; selecting one opens a larger popup
 preview for easier manual marking.
@@ -161,8 +179,45 @@ required). This removes all submissions and uploaded files, and resets submissio
 numbering.
 
 If `marking_template_docx` is not set, the app attempts auto-discovery using the
-first matching file in `making_template/` or `marking_template/` with pattern
+first matching file in `marking_template/` (or legacy `making_template/`) with pattern
 `marking_template*.docx`.
+
+### Worksheet template onboarding (marker-based)
+
+When there are no submissions, the admin overview shows a template upload flow.
+Uploading a worksheet DOCX validates strict markers and generates:
+
+```text
+marking_template/active_template.docx
+marking_template/test_case/active_template.json
+```
+
+Upload is blocked if markers are invalid; detailed validation errors are shown
+in the dashboard.
+
+Supported marker forms:
+
+1. Inline prompt style
+
+```text
+[Q1: Introduce yourself (name, course). M:2]
+[Q1 END]
+```
+
+2. Two-line prompt style
+
+```text
+[Q1: QUESTION M:2]
+Introduce yourself (name, course).
+[Q1 END]
+```
+
+Rules:
+
+1. Question IDs must match between start and end markers.
+2. Duplicate question IDs are rejected.
+3. Nested question blocks are rejected.
+4. Missing end markers are rejected.
 
 ## Change log
 

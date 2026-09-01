@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ file_name }} - Video preview</title>
+<style>
+:root {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  padding: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: #1c2430;
+  background: #ffffff;
+  line-height: 1.45;
+}
+
+h1 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.meta {
+  color: #52606d;
+  font-size: 0.78rem;
+  margin: 0 0 10px;
+  overflow-wrap: anywhere;
+}
+
+.notice {
+  border-left: 3px solid #2856a3;
+  background: #f4f7fc;
+  padding: 8px 10px;
+  margin: 0 0 10px;
+  font-size: 0.78rem;
+  color: #1d3f7a;
+}
+
+.error {
+  border-left: 3px solid #b3261e;
+  background: #fdecea;
+  color: #6a1b16;
+}
+
+video {
+  display: block;
+  width: 100%;
+  max-height: calc(100vh - 140px);
+  background: #000;
+  border-radius: 10px;
+}
+
+.video-wrap {
+  margin-top: 10px;
+}
+</style>
+</head>
+<body>
+  <h1>{{ file_name }}</h1>
+  <div class="meta">{{ file_path }}</div>
+
+  {% if error_message %}
+  <div class="notice error">{{ error_message }}</div>
+  {% else %}
+  <div class="notice">Video is shown here for marking comparison and can be played directly.</div>
+  {% endif %}
+
+  <div class="video-wrap">
+    <video id="media-video" controls playsinline preload="metadata">
+      <source id="media-source" src="" type="{{ media_type }}">
+      Your browser does not support the video element.
+    </video>
+  </div>
+
+  <script>
+  (() => {
+    const mediaUrl = {{ media_url | tojson }};
+    const video = document.getElementById('media-video');
+    const source = document.getElementById('media-source');
+    const status = document.querySelector('.notice');
+    let objectUrl = '';
+
+    async function loadMedia() {
+      try {
+        const response = await fetch(mediaUrl);
+        if (!response.ok) {
+          throw new Error(`Media request failed: ${response.status}`);
+        }
+
+        const blob = await response.blob();
+        objectUrl = URL.createObjectURL(blob);
+        source.src = objectUrl;
+        video.load();
+        if (status) {
+          status.textContent = 'Video loaded. Use the player controls to play it here.';
+        }
+      } catch (error) {
+        if (status) {
+          status.textContent = error.message || 'Could not load video.';
+          status.classList.add('error');
+        }
+      }
+    }
+
+    window.addEventListener('beforeunload', () => {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    });
+
+    loadMedia();
+  })();
+  </script>
+</body>
+</html>

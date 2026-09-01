@@ -1,5 +1,6 @@
 import json
 import os
+import mimetypes
 import random
 import re
 import shutil
@@ -29,10 +30,26 @@ load_dotenv()
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-key-change-me")
-app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # hard ceiling, per-field limits enforced below
 
 with open(Path(__file__).parent / "config.json") as f:
     SUBMISSION_CONFIG = json.load(f)
+
+
+def _compute_max_content_length(config):
+    """Set a hard upload ceiling above configured per-area limits."""
+    areas = config.get("areas", [])
+    total_mb = 0
+    for area in areas:
+        max_size_mb = int(area.get("max_size_mb", 0) or 0)
+        max_files = int(area.get("max_files", 1) or 1)
+        total_mb += max_size_mb * max_files
+
+    # Keep a safety floor and small multipart overhead headroom.
+    hard_ceiling_mb = max(100, total_mb + 20)
+    return hard_ceiling_mb * 1024 * 1024
+
+
+app.config["MAX_CONTENT_LENGTH"] = _compute_max_content_length(SUBMISSION_CONFIG)
 
 PROJECT_ROOT = Path(__file__).parent
 
@@ -61,6 +78,7 @@ OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
 MARKING_TEXT_PREVIEW_EXTENSIONS = {".mod", ".run", ".dat"}
 MARKING_TEXT_PREVIEW_MAX_BYTES = int(os.environ.get("MARKING_TEXT_PREVIEW_MAX_BYTES", str(2 * 1024 * 1024)))
 MARKING_DOCUMENT_PREVIEW_EXTENSIONS = {".pdf", ".docx"}
+MARKING_VIDEO_PREVIEW_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".wmv"}
 MARKING_DOCX_PREVIEW_MAX_PARAGRAPHS = int(os.environ.get("MARKING_DOCX_PREVIEW_MAX_PARAGRAPHS", "900"))
 MARKING_DOCX_PDF_PREVIEW_DIR = "marking_pdf_previews"
 MARKING_DOCX_PDF_CONVERTER = str(
@@ -69,6 +87,181 @@ MARKING_DOCX_PDF_CONVERTER = str(
         SUBMISSION_CONFIG.get("marking_docx_pdf_converter", "auto"),
     )
 ).strip().lower()
+ACTIVE_TEMPLATE_DOCX_PATH = PROJECT_ROOT / "marking_template" / "active_template.docx"
+ACTIVE_TEMPLATE_JSON_PATH = PROJECT_ROOT / "marking_template" / "test_case" / "active_template.json"
+
+
+def _normalize_question_id(value):
+    raw = str(value or "").strip().upper()
+    if not raw:
+        return None
+
+    if raw.startswith("Q"):
+        digits = raw[1:]
+    else:
+        digits = raw
+
+    if not digits.isdigit():
+        return None
+
+    number = int(digits)
+    if number <= 0:
+        return None
+    return f"Q{number}"
+
+
+def _normalize_area_question_targets(area):
+    """Return None for all-questions scope, else a set of normalized question IDs."""
+    if "questions" in area:
+        raw_value = area.get("questions")
+    elif "question" in area:
+        raw_value = area.get("question")
+    else:
+        return None
+
+    if raw_value in (None, "", []):
+        return None
+
+    values = raw_value if isinstance(raw_value, list) else [raw_value]
+    normalized = set()
+    for item in values:
+        question_id = _normalize_question_id(item)
+        if not question_id:
+            raise ValueError(
+                f"Invalid question mapping '{item}' for area '{area.get('key', '?')}'. "
+                "Use values like 2, '2', or 'Q2'."
+            )
+        normalized.add(question_id)
+
+    if not normalized:
+        return None
+    return normalized
+
+
+def _build_area_question_map(config):
+    mapping = {}
+    for area in config.get("areas", []):
+        area_key = str(area.get("key", "")).strip()
+        if not area_key:
+            continue
+        mapping[area_key] = _normalize_area_question_targets(area)
+    return mapping
+
+
+AREA_QUESTION_MAP = _build_area_question_map(SUBMISSION_CONFIG)
+
+
+def _question_sort_key(question_id):
+    parts = re.split(r"(\d+)", str(question_id or ""))
+    normalized = []
+    for part in parts:
+        if part.isdigit():
+            normalized.append((0, int(part)))
+        else:
+            normalized.append((1, part.lower()))
+    return normalized
+
+
+def _format_marks_label(max_score):
+    if max_score in (None, ""):
+        return ""
+    try:
+        numeric = float(max_score)
+    except (TypeError, ValueError):
+        return ""
+    if numeric.is_integer():
+        return f"{int(numeric)}M"
+    return f"{numeric}M"
+
+
+def _load_active_template_questions():
+    context = {
+        "status": "missing",
+        "warning": "",
+        "questions": [],
+        "question_ids": [],
+        "source_docx_exists": ACTIVE_TEMPLATE_DOCX_PATH.exists(),
+        "source_json_exists": ACTIVE_TEMPLATE_JSON_PATH.exists(),
+    }
+
+    if not ACTIVE_TEMPLATE_JSON_PATH.exists():
+        context["warning"] = (
+            "Active template JSON is missing. Marking is using extracted questions as a fallback."
+        )
+        return context
+
+    try:
+        payload = json.loads(ACTIVE_TEMPLATE_JSON_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        context["status"] = "invalid"
+        context["warning"] = (
+            f"Could not read active template JSON: {error}. "
+            "Marking is using extracted questions as a fallback."
+        )
+        return context
+
+    raw_questions = payload.get("questions")
+    if not isinstance(raw_questions, list):
+        context["status"] = "invalid"
+        context["warning"] = (
+            "Active template JSON is invalid (missing 'questions' list). "
+            "Marking is using extracted questions as a fallback."
+        )
+        return context
+
+    normalized = []
+    seen = set()
+    errors = []
+
+    for index, item in enumerate(raw_questions, start=1):
+        if not isinstance(item, dict):
+            errors.append(f"Entry {index} is not an object.")
+            continue
+
+        question_id = _normalize_question_id(item.get("question_id"))
+        if not question_id:
+            errors.append(f"Entry {index} has an invalid question_id.")
+            continue
+        if question_id in seen:
+            errors.append(f"Duplicate question_id '{question_id}' in active template JSON.")
+            continue
+
+        question_prompt = str(item.get("question_prompt", "") or "").strip()
+        max_score_raw = item.get("max_score")
+        max_score = None
+        if max_score_raw not in (None, ""):
+            try:
+                max_score = float(max_score_raw)
+            except (TypeError, ValueError):
+                errors.append(f"Question {question_id} has invalid max_score '{max_score_raw}'.")
+
+        normalized.append({
+            "question_id": question_id,
+            "question_prompt": question_prompt,
+            "max_score": max_score,
+            "marks_label": _format_marks_label(max_score),
+        })
+        seen.add(question_id)
+
+    if not normalized:
+        context["status"] = "invalid"
+        context["warning"] = (
+            "Active template JSON has no valid questions. "
+            "Marking is using extracted questions as a fallback."
+        )
+        return context
+
+    normalized = sorted(normalized, key=lambda item: _question_sort_key(item["question_id"]))
+    context["questions"] = normalized
+    context["question_ids"] = [item["question_id"] for item in normalized]
+
+    if errors:
+        context["status"] = "partial"
+        context["warning"] = "Active template loaded with warnings: " + " ".join(errors)
+    else:
+        context["status"] = "active"
+
+    return context
 
 
 def _resolve_docx_pdf_converter(preferred=None):
@@ -133,7 +326,17 @@ def _submission_root_folder(submission_record):
     return local_files[0].parents[1]
 
 
-def _collect_marking_text_files(submission_record):
+def _area_applies_to_question(area_key, question_id):
+    scope = AREA_QUESTION_MAP.get(area_key)
+    if not scope:
+        return True
+    normalized_question = _normalize_question_id(question_id)
+    if not normalized_question:
+        return True
+    return normalized_question in scope
+
+
+def _collect_marking_text_files(submission_record, question_id=None):
     submission_root = _submission_root_folder(submission_record)
     if not submission_root:
         return []
@@ -146,6 +349,10 @@ def _collect_marking_text_files(submission_record):
     entries = []
     seen_paths = set()
     for file_record in submission_record.get("files", []):
+        area_key = file_record.get("area_key")
+        if question_id and not _area_applies_to_question(area_key, question_id):
+            continue
+
         path = Path(file_record.get("storage_location", ""))
         if path.suffix.lower() not in MARKING_TEXT_PREVIEW_EXTENSIONS:
             continue
@@ -172,7 +379,7 @@ def _collect_marking_text_files(submission_record):
     return sorted(entries, key=lambda item: item["path"].lower())
 
 
-def _collect_marking_document_files(submission_record):
+def _collect_marking_document_files(submission_record, question_id=None):
     submission_root = _submission_root_folder(submission_record)
     if not submission_root:
         return []
@@ -185,9 +392,13 @@ def _collect_marking_document_files(submission_record):
     entries = []
     seen_paths = set()
     for file_record in submission_record.get("files", []):
+        area_key = file_record.get("area_key")
+        if question_id and not _area_applies_to_question(area_key, question_id):
+            continue
+
         path = Path(file_record.get("storage_location", ""))
         extension = path.suffix.lower()
-        if extension not in MARKING_DOCUMENT_PREVIEW_EXTENSIONS:
+        if extension not in MARKING_DOCUMENT_PREVIEW_EXTENSIONS and extension not in MARKING_VIDEO_PREVIEW_EXTENSIONS:
             continue
         if not path.exists() or not path.is_file():
             continue
@@ -209,6 +420,7 @@ def _collect_marking_document_files(submission_record):
             "label": f"{area_label}: {original_name}",
             "extension": extension,
             "name": original_name,
+            "media_type": "video" if extension in MARKING_VIDEO_PREVIEW_EXTENSIONS else "document",
         })
 
     return sorted(entries, key=lambda item: item["path"].lower())
@@ -664,13 +876,25 @@ def api_submission_preview():
 
 @app.route("/api/submit", methods=["POST"])
 def api_submit():
-    name = request.form.get("name", "").strip()
+    first_name = request.form.get("first_name", "").strip()
+    last_name = request.form.get("last_name", "").strip()
+    legacy_name = request.form.get("name", "").strip()
+
+    # Backward-compatible fallback for old clients still posting single name.
+    if not first_name and not last_name and legacy_name:
+        parts = legacy_name.split(None, 1)
+        first_name = parts[0]
+        last_name = parts[1] if len(parts) > 1 else ""
+
+    name = " ".join(part for part in [first_name, last_name] if part)
     student_id = request.form.get("student_id", "").strip()
     email = request.form.get("email", "").strip()
 
     errors = []
-    if not name:
-        errors.append("Name is required.")
+    if not first_name:
+        errors.append("First name is required.")
+    if not last_name:
+        errors.append("Last name is required.")
     if not student_id:
         errors.append("Student ID is required.")
     if not email:
@@ -751,6 +975,8 @@ def api_submit():
                     file_metadata = metadata.extract_file_metadata(
                         tmp_path, f.filename, area_key
                     )
+                    area_scope = AREA_QUESTION_MAP.get(area_key)
+                    file_metadata["question_scope"] = sorted(area_scope) if area_scope else "all"
                     metadata_path = (
                         Path(STORAGE_ENV["LOCAL_UPLOAD_ROOT"])
                         / dest_folder
@@ -814,6 +1040,7 @@ def api_submit():
                                 extracted_path, archive_name, area_key
                             )
                             extracted_metadata["extracted_from"] = f.filename
+                            extracted_metadata["question_scope"] = sorted(area_scope) if area_scope else "all"
                             extracted_metadata_path = (
                                 Path(STORAGE_ENV["LOCAL_UPLOAD_ROOT"])
                                 / dest_folder
@@ -918,10 +1145,23 @@ def admin_logout():
 @login_required
 def admin_dashboard():
     search = request.args.get("q", "").strip()
-    marking_filter = request.args.get("marking", "all").strip().lower()
+    marking_filter = request.args.get("marking", "all")
+    sort_key = request.args.get("sort", "submitted_at")
+    sort_dir = request.args.get("dir", "desc")
+    return _render_admin_dashboard(
+        search=search,
+        marking_filter=marking_filter,
+        sort_key=sort_key,
+        sort_dir=sort_dir,
+    )
+
+
+def _build_dashboard_context(search="", marking_filter="all", sort_key="submitted_at", sort_dir="desc"):
+    marking_filter = str(marking_filter or "all").strip().lower()
     if marking_filter not in {"all", "included", "excluded"}:
         marking_filter = "all"
-    sort_key = request.args.get("sort", "submitted_at").strip().lower()
+
+    sort_key = str(sort_key or "submitted_at").strip().lower()
     if sort_key not in {
         "submitted_at",
         "name",
@@ -935,7 +1175,7 @@ def admin_dashboard():
     }:
         sort_key = "submitted_at"
 
-    sort_dir = request.args.get("dir", "desc").strip().lower()
+    sort_dir = str(sort_dir or "desc").strip().lower()
     if sort_dir not in {"asc", "desc"}:
         sort_dir = "desc"
 
@@ -973,16 +1213,88 @@ def admin_dashboard():
 
     included_count = len(db.list_submissions(marking_filter="included"))
     excluded_count = len(db.list_submissions(marking_filter="excluded"))
-    return render_template(
-        "admin_dashboard.html", submissions=submissions, search=search,
+
+    active_template_context = _load_active_template_questions()
+
+    return {
+        "submissions": submissions,
+        "search": search,
+        "marking_filter": marking_filter,
+        "sort_key": sort_key,
+        "sort_dir": sort_dir,
+        "included_count": included_count,
+        "excluded_count": excluded_count,
+        "assignment_title": SUBMISSION_CONFIG["assignment_title"],
+        "form_version": SUBMISSION_CONFIG.get("form_version"),
+        "active_template_docx_exists": ACTIVE_TEMPLATE_DOCX_PATH.exists(),
+        "active_template_json_exists": ACTIVE_TEMPLATE_JSON_PATH.exists(),
+        "active_template_docx_name": ACTIVE_TEMPLATE_DOCX_PATH.name,
+        "active_template_json_name": ACTIVE_TEMPLATE_JSON_PATH.name,
+        "active_template_question_count": len(active_template_context["question_ids"]),
+        "active_template_status": active_template_context["status"],
+        "active_template_warning": active_template_context["warning"],
+    }
+
+
+def _render_admin_dashboard(search="", marking_filter="all", sort_key="submitted_at", sort_dir="desc", template_upload_errors=None, status_code=200):
+    context = _build_dashboard_context(
+        search=search,
         marking_filter=marking_filter,
         sort_key=sort_key,
         sort_dir=sort_dir,
-        included_count=included_count,
-        excluded_count=excluded_count,
-        assignment_title=SUBMISSION_CONFIG["assignment_title"],
-        form_version=SUBMISSION_CONFIG.get("form_version"),
     )
+    context["template_upload_errors"] = template_upload_errors or []
+    return render_template("admin_dashboard.html", **context), status_code
+
+
+@app.route("/admin/template/upload", methods=["POST"])
+@login_required
+def admin_template_upload():
+    uploaded = request.files.get("template_docx")
+    errors = []
+
+    if not uploaded or not uploaded.filename:
+        errors.append("Please choose a DOCX template file to upload.")
+    else:
+        extension = Path(uploaded.filename).suffix.lower()
+        if extension != ".docx":
+            errors.append("Template upload only accepts .docx files.")
+
+    if errors:
+        return _render_admin_dashboard(template_upload_errors=errors, status_code=400)
+
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            candidate = Path(tmpdir) / (secure_filename(uploaded.filename) or "template.docx")
+            uploaded.save(candidate)
+
+            template_payload = metadata.build_active_template_case_file(candidate)
+            marker_errors = template_payload.get("errors", [])
+            if marker_errors:
+                return _render_admin_dashboard(
+                    template_upload_errors=["Template validation failed:", *marker_errors],
+                    status_code=400,
+                )
+
+            ACTIVE_TEMPLATE_DOCX_PATH.parent.mkdir(parents=True, exist_ok=True)
+            ACTIVE_TEMPLATE_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+            shutil.copy2(candidate, ACTIVE_TEMPLATE_DOCX_PATH)
+            metadata.write_metadata(ACTIVE_TEMPLATE_JSON_PATH, template_payload)
+    except (OSError, metadata.zipfile.BadZipFile, metadata.ElementTree.ParseError) as error:
+        return _render_admin_dashboard(
+            template_upload_errors=[
+                "Template upload failed while reading the DOCX.",
+                str(error),
+            ],
+            status_code=400,
+        )
+
+    flash(
+        f"Template uploaded: {uploaded.filename}. "
+        f"Saved as {ACTIVE_TEMPLATE_DOCX_PATH.name} and generated {ACTIVE_TEMPLATE_JSON_PATH.name}."
+    )
+    return redirect(url_for("admin_dashboard"))
 
 
 @app.route("/admin/submission/<int:submission_id>/marking-eligibility", methods=["POST"])
@@ -1549,56 +1861,118 @@ def admin_submission_marking(submission_id):
             return False
         score = str(assessment_record.get("score", "") or "").strip()
         comment = str(assessment_record.get("comment", "") or "").strip()
-        return bool(score or comment)
+        return bool(score and comment)
 
-    def extract_question_ids(previews):
+    active_template_context = _load_active_template_questions()
+    template_questions = active_template_context["questions"]
+    template_question_ids = active_template_context["question_ids"]
+    template_question_map = {item["question_id"]: item for item in template_questions}
+
+    def extract_answers_by_question(previews):
         ordered = []
         seen = set()
+        by_question = {}
         for preview in previews:
             for answer in preview["data"].get("answers", []):
-                question_id = answer.get("question_id")
-                if question_id and question_id not in seen:
-                    seen.add(question_id)
-                    ordered.append(question_id)
-        return ordered
-
-    def find_answer_for_question(previews, question_id):
-        for preview in previews:
-            for answer in preview["data"].get("answers", []):
-                if answer.get("question_id") == question_id:
-                    return {
-                        "preview_file": preview["file"],
-                        "answer": answer,
-                        "images": answer.get("images", []),
-                    }
-        return None
-
-    def has_unmarked_items(previews, assessment_map):
-        has_answers = False
-        for preview in previews:
-            for answer in preview["data"].get("answers", []):
-                question_id = answer.get("question_id")
+                question_id = _normalize_question_id(answer.get("question_id"))
                 if not question_id:
                     continue
-                has_answers = True
-                if not assessment_has_marking(assessment_map.get(question_id, {})):
-                    return True
-        return False if has_answers else False
+
+                answer_copy = dict(answer)
+                answer_copy["question_id"] = question_id
+                answer_copy["template_question_id"] = (
+                    _normalize_question_id(answer_copy.get("template_question_id")) or question_id
+                )
+
+                if question_id not in seen:
+                    seen.add(question_id)
+                    ordered.append(question_id)
+
+                if question_id not in by_question:
+                    by_question[question_id] = {
+                        "preview_file": preview["file"],
+                        "answer": answer_copy,
+                        "images": answer_copy.get("images", []),
+                    }
+
+        return ordered, by_question
+
+    def merge_question_ids(*question_id_lists):
+        merged = []
+        seen = set()
+        extras = []
+        for index, values in enumerate(question_id_lists):
+            for raw in values or []:
+                question_id = _normalize_question_id(raw)
+                if not question_id or question_id in seen:
+                    continue
+                seen.add(question_id)
+                if index == 0:
+                    merged.append(question_id)
+                else:
+                    extras.append(question_id)
+
+        for question_id in sorted(set(extras), key=_question_sort_key):
+            if question_id not in merged:
+                merged.append(question_id)
+        return merged
+
+    def build_answer_entry(question_id, matched):
+        template_meta = template_question_map.get(question_id, {})
+        template_prompt = str(template_meta.get("question_prompt", "") or "").strip()
+        template_marks_label = str(template_meta.get("marks_label", "") or "").strip()
+
+        source_answer = dict((matched or {}).get("answer") or {})
+        extracted_prompt = str(source_answer.get("prompt", "") or "").strip()
+        merged_prompt = extracted_prompt or template_prompt
+
+        answer_entry = {
+            "question_id": question_id,
+            "template_question_id": source_answer.get("template_question_id") or question_id,
+            "prompt": merged_prompt,
+            "template_prompt": template_prompt,
+            "extracted_prompt": extracted_prompt,
+            "marks_label": source_answer.get("marks_label") or template_marks_label,
+            "answer": str(source_answer.get("answer", "") or ""),
+            "answer_paragraphs": source_answer.get("answer_paragraphs") or [],
+            "confidence": source_answer.get("confidence"),
+            "images": source_answer.get("images") or [],
+            "max_score": template_meta.get("max_score"),
+        }
+
+        return {
+            "preview_file": (matched or {}).get("preview_file"),
+            "answer": answer_entry,
+            "images": answer_entry["images"],
+        }
+
+    def has_unmarked_items(previews, assessment_map):
+        extracted_ids, _ = extract_answers_by_question(previews)
+        question_ids = merge_question_ids(template_question_ids, extracted_ids, assessment_map.keys())
+        for question_id in question_ids:
+            if not assessment_has_marking(assessment_map.get(question_id, {})):
+                return True
+        return False
 
     previews = _load_marking_previews(submission)
-    question_ids = extract_question_ids(previews)
+    extracted_question_ids, answers_by_question = extract_answers_by_question(previews)
     assessments = {
         item["question_id"]: item
         for item in db.list_marking_assessments(submission_id)
     }
-    eval_candidates = {
-        answer["question_id"]: (
-            db.get_eval_case_candidate(submission_id, answer["question_id"]) or {}
-        )
-        for preview in previews
-        for answer in preview["data"].get("answers", [])
-        if answer.get("question_id")
-    }
+    question_ids = merge_question_ids(template_question_ids, extracted_question_ids, assessments.keys())
+
+    student_question_entries = []
+    for question_id in question_ids:
+        matched = answers_by_question.get(question_id)
+        answer_block = build_answer_entry(question_id, matched)
+        student_question_entries.append({
+            "question_id": question_id,
+            "assessment": assessments.get(question_id, {}),
+            "eval_candidate": db.get_eval_case_candidate(submission_id, question_id) or {},
+            **answer_block,
+        })
+
     can_reextract = not db.has_marking_assessments(submission_id)
 
     included_submissions = db.list_submissions(marking_filter="included")
@@ -1650,8 +2024,10 @@ def admin_submission_marking(submission_id):
 
     if view_mode == "question":
         # Build answer entries for every submission that has this question.
-        all_question_ids = []
+        all_question_ids = list(template_question_ids)
         all_seen = set()
+        for question_id in template_question_ids:
+            all_seen.add(question_id)
         question_has_unmarked = {}
         staged = []
         for summary in included_submissions:
@@ -1663,14 +2039,22 @@ def admin_submission_marking(submission_id):
                 item["question_id"]: item
                 for item in db.list_marking_assessments(full_submission["id"])
             }
-            for qid in extract_question_ids(full_previews):
+
+            full_extracted_ids, full_answers_by_question = extract_answers_by_question(full_previews)
+            full_question_ids = merge_question_ids(
+                template_question_ids,
+                full_extracted_ids,
+                full_assessments.keys(),
+            )
+
+            for qid in full_question_ids:
                 if qid not in all_seen:
                     all_seen.add(qid)
                     all_question_ids.append(qid)
                 if not assessment_has_marking(full_assessments.get(qid, {})):
                     question_has_unmarked[qid] = True
 
-            staged.append((full_submission, full_previews, full_assessments))
+            staged.append((full_submission, full_assessments, full_answers_by_question, full_question_ids))
 
         if show_only_unmarked:
             all_question_ids = [qid for qid in all_question_ids if question_has_unmarked.get(qid)]
@@ -1684,14 +2068,17 @@ def admin_submission_marking(submission_id):
         question_all_marked = bool(show_only_unmarked and not question_ids)
 
         if selected_question:
-            for full_submission, full_previews, full_assessments in staged:
-                matched = find_answer_for_question(full_previews, selected_question)
-                if not matched:
+            for full_submission, full_assessments, full_answers_by_question, full_question_ids in staged:
+                if selected_question not in full_question_ids:
                     continue
                 selected_assessment = full_assessments.get(selected_question, {})
                 if show_only_unmarked and assessment_has_marking(selected_assessment):
                     continue
                 eval_candidate = db.get_eval_case_candidate(full_submission["id"], selected_question)
+                answer_block = build_answer_entry(
+                    selected_question,
+                    full_answers_by_question.get(selected_question),
+                )
                 question_entries.append({
                     "submission_id": full_submission["id"],
                     "name": full_submission["name"],
@@ -1700,7 +2087,7 @@ def admin_submission_marking(submission_id):
                     "submitted_at": full_submission["submitted_at"],
                     "assessment": selected_assessment,
                     "eval_candidate": eval_candidate,
-                    **matched,
+                    **answer_block,
                 })
 
         if question_entries:
@@ -1719,13 +2106,21 @@ def admin_submission_marking(submission_id):
     if view_mode == "question" and question_entry and question_entry["submission_id"] != submission["id"]:
         marking_text_submission = db.get_submission(question_entry["submission_id"]) or submission
 
-    marking_text_files = _collect_marking_text_files(marking_text_submission)
-    marking_document_files = _collect_marking_document_files(marking_text_submission)
+    active_question_for_files = selected_question if view_mode == "question" else None
+    marking_text_files = _collect_marking_text_files(marking_text_submission, question_id=active_question_for_files)
+    marking_document_files = _collect_marking_document_files(marking_text_submission, question_id=active_question_for_files)
     marking_document_options = []
 
     for item in marking_document_files:
         extension = item.get("extension", "")
-        if extension == ".pdf":
+        if item.get("media_type") == "video":
+            marking_document_options.append({
+                "path": item["path"],
+                "mode": "video",
+                "label": f"{item['label']} [Video]",
+                "priority": 0,
+            })
+        elif extension == ".pdf":
             marking_document_options.append({
                 "path": item["path"],
                 "mode": "pdf",
@@ -1748,6 +2143,16 @@ def admin_submission_marking(submission_id):
 
     marking_document_options.sort(key=lambda item: (item["priority"], item["label"].lower()))
 
+    default_option = None
+    for preferred_mode in ("pdf", "converted_pdf", "docx"):
+        default_option = next((item for item in marking_document_options if item.get("mode") == preferred_mode), None)
+        if default_option:
+            break
+    if not default_option and marking_document_options:
+        default_option = marking_document_options[0]
+    for item in marking_document_options:
+        item["selected"] = item is default_option
+
     return render_template(
         "admin_marking.html",
         submission=submission,
@@ -1756,10 +2161,11 @@ def admin_submission_marking(submission_id):
         previews=previews,
         question_ids=question_ids,
         selected_question=selected_question,
+        student_question_entries=student_question_entries,
         question_entry=question_entry,
         assessments=assessments,
-        eval_candidates=eval_candidates,
         can_reextract=can_reextract,
+        active_template_status=active_template_context,
         prev_submission_id=prev_submission_id,
         next_submission_id=next_submission_id,
         question_prev_submission_id=question_prev_submission_id,
@@ -1851,6 +2257,22 @@ def admin_marking_document_preview(submission_id):
         abort(404, "File does not exist.")
 
     extension = candidate.suffix.lower()
+    if extension in MARKING_VIDEO_PREVIEW_EXTENSIONS:
+        if preview_mode in {"", "video"}:
+            media_url = url_for("admin_marking_document_media", submission_id=submission_id, path=relative_path)
+            media_type = mimetypes.guess_type(candidate.name)[0] or "video/mp4"
+            return render_template(
+                "admin_marking_media_preview.html",
+                file_name=candidate.name,
+                file_path=relative_path,
+                media_url=media_url,
+                media_type=media_type,
+                media_kind="video",
+                error_message="",
+            )
+
+        abort(400, "Unknown preview mode for video files.")
+
     if extension == ".pdf":
         return send_file(candidate, mimetype="application/pdf", as_attachment=False, download_name=candidate.name)
 
@@ -1900,6 +2322,34 @@ def admin_marking_document_preview(submission_id):
     abort(400, "Only PDF and DOCX files are supported.")
 
 
+@app.route("/admin/submission/<int:submission_id>/marking/media")
+@login_required
+def admin_marking_document_media(submission_id):
+    submission = db.get_submission(submission_id)
+    if not submission:
+        abort(404)
+
+    relative_path = request.args.get("path", "").strip()
+    if not relative_path:
+        abort(400, "Missing file path.")
+
+    document_entries = _collect_marking_document_files(submission)
+    allowed_paths = {entry["path"] for entry in document_entries}
+    if relative_path not in allowed_paths:
+        abort(404, "Requested file is not available for preview.")
+
+    candidate = _resolve_submission_relative_file(submission, relative_path)
+    if not candidate:
+        abort(404, "File does not exist.")
+
+    extension = candidate.suffix.lower()
+    if extension not in MARKING_VIDEO_PREVIEW_EXTENSIONS:
+        abort(400, "Only video files are supported.")
+
+    mimetype = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
+    return send_file(candidate, mimetype=mimetype, as_attachment=False, download_name=candidate.name)
+
+
 @app.route("/admin/submission/<int:submission_id>/marking/assessment", methods=["POST"])
 @login_required
 def admin_save_marking_assessment(submission_id):
@@ -1945,7 +2395,7 @@ def admin_save_marking_assessment(submission_id):
 
         # Auto-capture manual (non-AI) entries into evaluation candidates.
         if comment_source == "human" and not ai_draft_used:
-            if question_prompt and student_answer and (score or comment):
+            if question_prompt and student_answer and score and comment:
                 db.save_eval_case_candidate(
                     submission_id=submission_id,
                     question_id=question_id,
@@ -2081,8 +2531,12 @@ def admin_reextract_marking_preview(submission_id):
         except (OSError, metadata.zipfile.BadZipFile, metadata.ElementTree.ParseError):
             errors += 1
 
+    active_template_note = ""
+    if ACTIVE_TEMPLATE_DOCX_PATH.exists():
+        active_template_note = f" using {ACTIVE_TEMPLATE_DOCX_PATH.name}"
+
     if updated:
-        flash(f"Re-extracted marking preview for {updated} file(s).")
+        flash(f"Re-extracted marking preview for {updated} file(s){active_template_note}.")
     elif errors:
         flash("Re-extract failed for all candidate files.")
     else:

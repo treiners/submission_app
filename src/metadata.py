@@ -40,6 +40,22 @@ DOCX_REL_NAMESPACE = {
 }
 IMAGE_ONLY_DEFAULT_ANSWER = "The answer contained only an image"
 IMAGE_PROMPT_KEYWORDS = ("image", "photo", "screenshot", "scan")
+TEMPLATE_MARKER_START_PATTERN = re.compile(
+    r"^\[(Q\d+)\s*:\s*(.*?)\s*M\s*:\s*(\d+)\]$",
+    re.IGNORECASE,
+)
+TEMPLATE_MARKER_END_PATTERN = re.compile(
+    r"^\[(Q\d+)\s*:?[\s]+END\]$",
+    re.IGNORECASE,
+)
+SUBMISSION_MARKER_START_PATTERN = re.compile(
+    r"^\[(Q\d+)\s*:\s*.*\]$",
+    re.IGNORECASE,
+)
+SUBMISSION_MARKER_END_PATTERN = re.compile(
+    r"^\[(Q\d+)\s*:?[\s]+END\]$",
+    re.IGNORECASE,
+)
 
 
 def _sha256(path):
@@ -444,6 +460,23 @@ def _finalize_answers_for_rendering(answers):
     return finalized
 
 
+def _strip_submission_markers(paragraphs):
+    """Remove submission tag lines from captured answer paragraphs."""
+    cleaned = []
+    for paragraph in paragraphs or []:
+        text = str(paragraph or "").strip()
+        if not text:
+            continue
+
+        text = re.sub(r"^\[(Q\d+)\s*:\s*[^\]]*\]\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*\[(Q\d+)\s*:?[\s]+END\]\s*$", "", text, flags=re.IGNORECASE)
+        text = text.strip()
+        if text:
+            cleaned.append(text)
+
+    return cleaned
+
+
 def _is_image_capture_prompt(prompt):
     lowered = (prompt or "").strip().lower()
     return any(keyword in lowered for keyword in IMAGE_PROMPT_KEYWORDS)
@@ -536,6 +569,11 @@ def _estimate_answer_confidence(answer_paragraphs, unmatched_count):
 def resolve_marking_template_docx(project_root, submission_config):
     """Locate the active DOCX template used for extraction."""
     project_root = Path(project_root)
+
+    active_template = project_root / "marking_template" / "active_template.docx"
+    if active_template.exists():
+        return active_template
+
     configured = submission_config.get("marking_template_docx")
     if configured:
         configured_path = Path(configured)
@@ -628,6 +666,7 @@ def extract_answers_with_template(submission_docx, template_docx):
         flat = []
         for block in blocks or []:
             flat.extend(block)
+        flat = _strip_submission_markers(flat)
         answers.append({
             "question_id": f"Q{prompt_index[prompt]}",
             "template_question_id": f"Q{prompt_index[prompt]}",
@@ -669,10 +708,6 @@ def _attach_images_to_answers(submission_docx, answers, images):
 
     records = _docx_paragraph_records(submission_docx)
     normalize = lambda value: " ".join((value or "").split()).lower()
-    prompt_to_question = {
-        normalize(answer["prompt"]): answer["question_id"]
-        for answer in answers
-    }
 
     image_by_name = {image["filename"]: image for image in images}
     question_to_image_names = {answer["question_id"]: [] for answer in answers}
@@ -680,8 +715,18 @@ def _attach_images_to_answers(submission_docx, answers, images):
     active_question = None
     for record in records:
         norm_text = normalize(record.get("text", ""))
-        if norm_text in prompt_to_question:
-            active_question = prompt_to_question[norm_text]
+        start_match = SUBMISSION_MARKER_START_PATTERN.match(norm_text)
+        end_match = SUBMISSION_MARKER_END_PATTERN.match(norm_text)
+
+        if start_match:
+            active_question = start_match.group(1).upper()
+            continue
+
+        if end_match:
+            if active_question == end_match.group(1).upper():
+                active_question = None
+            continue
+
         if active_question and record.get("images"):
             question_to_image_names[active_question].extend(record["images"])
 
@@ -722,4 +767,134 @@ def extract_marking_preview(submission_docx, submission_config, project_root):
         "image_count": len(images),
         "images": images,
         **extraction,
+    }
+
+
+def parse_template_markers(template_docx):
+    """Parse strict [Qx: QUESTION M:n] ... [Qx: END] markers from a DOCX template."""
+    lines = _docx_paragraphs(template_docx)
+    errors = []
+    questions = []
+    seen_questions = set()
+
+    active_question_id = None
+    active_marks = None
+    active_prompt_lines = []
+
+    for line_index, raw_line in enumerate(lines, start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        start_match = TEMPLATE_MARKER_START_PATTERN.match(line)
+        end_match = TEMPLATE_MARKER_END_PATTERN.match(line)
+
+        if start_match:
+            question_id = start_match.group(1).upper()
+            prompt_head = (start_match.group(2) or "").strip()
+            max_score = int(start_match.group(3))
+
+            if active_question_id:
+                errors.append(
+                    f"Line {line_index}: nested start marker for {question_id} while {active_question_id} is still open."
+                )
+                continue
+
+            if question_id in seen_questions:
+                errors.append(
+                    f"Line {line_index}: duplicate start marker for {question_id}."
+                )
+                continue
+
+            active_question_id = question_id
+            active_marks = max_score
+            active_prompt_lines = []
+            if prompt_head and prompt_head.upper() != "QUESTION":
+                active_prompt_lines.append(prompt_head)
+            continue
+
+        if end_match:
+            question_id = end_match.group(1).upper()
+            if not active_question_id:
+                errors.append(
+                    f"Line {line_index}: end marker for {question_id} appears without a matching start marker."
+                )
+                continue
+
+            if question_id != active_question_id:
+                errors.append(
+                    f"Line {line_index}: end marker {question_id} does not match open question {active_question_id}."
+                )
+                continue
+
+            prompt_text = " ".join(active_prompt_lines).strip()
+            if not prompt_text:
+                errors.append(
+                    f"Line {line_index}: {question_id} has no prompt text between start and end markers."
+                )
+            else:
+                questions.append({
+                    "question_id": active_question_id,
+                    "question_prompt": prompt_text,
+                    "max_score": active_marks,
+                })
+                seen_questions.add(active_question_id)
+
+            active_question_id = None
+            active_marks = None
+            active_prompt_lines = []
+            continue
+
+        if active_question_id:
+            active_prompt_lines.append(line)
+
+    if active_question_id:
+        errors.append(f"Missing end marker for {active_question_id}.")
+
+    if not questions:
+        errors.append(
+            "No valid question markers found. Use markers like [Q1: inline prompt M:6] and [Q1 END], or [Q1: QUESTION M:6] with prompt text before [Q1 END]."
+        )
+
+    return {
+        "questions": questions,
+        "errors": errors,
+        "line_count": len(lines),
+    }
+
+
+def build_active_template_case_file(template_docx):
+    """Build active_template.json payload from strict marker parsing."""
+    parsed = parse_template_markers(template_docx)
+    questions = parsed["questions"]
+
+    cases = []
+    for question in questions:
+        qid = question["question_id"]
+        qnum = qid[1:].strip() if qid.upper().startswith("Q") else qid
+        cases.append({
+            "case_id": f"template_{qid.lower()}",
+            "question_id": qid,
+            "question_prompt": question["question_prompt"],
+            "student_answer": "",
+            "max_score": question["max_score"],
+            "reference_score": "",
+            "reference_minimum_requirements_met": False,
+            "reference_comment": "",
+            "reference_strengths": [],
+            "reference_gaps": [],
+            "notes_for_edge_cases": f"Generated from marker template for Q{qnum}.",
+        })
+
+    return {
+        "template": {
+            "source_docx": str(Path(template_docx)),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "marker_format": "[Qx: inline prompt M:n] ... [Qx END]",
+            "line_count": parsed["line_count"],
+            "question_count": len(questions),
+        },
+        "questions": questions,
+        "cases": cases,
+        "errors": parsed["errors"],
     }
