@@ -53,7 +53,7 @@ Edit `config.json` — no code changes needed:
 ```json
 {
   "assignment_title": "Assignment 1 Submission",
-  "form_version": "1.4.0",
+  "form_version": "1.5.0",
   "marking_template_docx": "marking_template/marking_template_MATH5007_A1P1_2026_S2.docx",
   "marking_extraction_areas": ["report"],
   "marking_preview_max_images": 12,
@@ -140,6 +140,30 @@ Embedded images from the DOCX are also extracted (up to the configured max) and
 displayed inline in the same marking preview page.
 Image links shown under each answer are now tied to the question where the image
 appears in the original submission.
+
+### Video preview notes (.mov and others)
+
+Browser support for `.mov` files depends on the codec inside the file. Some
+QuickTime encodings play in Safari but fail in Chromium-based browsers.
+
+The marking media preview now:
+1. Streams the original uploaded video directly.
+2. Auto-falls back to an MP4 preview when native playback fails (for formats
+  such as `.mov`, `.avi`, `.mkv`, `.wmv`, `.m4v`).
+
+The MP4 fallback requires `ffmpeg` on the server machine:
+
+```bash
+brew install ffmpeg
+```
+
+Optional environment flag:
+
+```bash
+MARKING_VIDEO_TRANSCODE_ENABLED=1
+```
+
+Set it to `0` to disable fallback conversion.
 
 The marking preview page supports two review modes:
 - **Per student**: all extracted answers for one submission, with previous/next

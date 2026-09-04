@@ -477,6 +477,51 @@ def _strip_submission_markers(paragraphs):
     return cleaned
 
 
+def _extract_submission_marker_blocks(paragraphs):
+    """Extract [Qx: ...] ... [Qx END] blocks from submission paragraph text.
+
+    Returns a mapping like {"Q1": ["line 1", "line 2"]}. If markers are
+    malformed (nested, mismatched, or unterminated), returns an empty mapping
+    so callers can safely fall back to prompt/diff extraction.
+    """
+    blocks = {}
+    active_question = None
+    active_lines = []
+
+    for paragraph in paragraphs or []:
+        line = str(paragraph or "").strip()
+        if not line:
+            continue
+
+        start_match = SUBMISSION_MARKER_START_PATTERN.match(line)
+        end_match = SUBMISSION_MARKER_END_PATTERN.match(line)
+
+        if start_match:
+            question_id = start_match.group(1).upper()
+            if active_question is not None:
+                return {}
+            active_question = question_id
+            active_lines = []
+            continue
+
+        if end_match:
+            question_id = end_match.group(1).upper()
+            if active_question != question_id:
+                return {}
+            blocks[question_id] = active_lines[:]
+            active_question = None
+            active_lines = []
+            continue
+
+        if active_question is not None:
+            active_lines.append(line)
+
+    if active_question is not None:
+        return {}
+
+    return blocks
+
+
 def _is_image_capture_prompt(prompt):
     lowered = (prompt or "").strip().lower()
     return any(keyword in lowered for keyword in IMAGE_PROMPT_KEYWORDS)
@@ -595,6 +640,7 @@ def extract_answers_with_template(submission_docx, template_docx):
     """Extract free-text answers by comparing a filled DOCX to a template DOCX."""
     template_lines = _docx_paragraphs(template_docx)
     submission_lines = _docx_paragraphs(submission_docx)
+    marker_blocks = _extract_submission_marker_blocks(submission_lines)
 
     matcher = difflib.SequenceMatcher(a=template_lines, b=submission_lines, autojunk=False)
     prompt_order = []
@@ -662,14 +708,19 @@ def extract_answers_with_template(submission_docx, template_docx):
 
     answers = []
     for prompt in prompt_order:
-        blocks = answer_blocks.get(prompt)
-        flat = []
-        for block in blocks or []:
-            flat.extend(block)
+        question_id = f"Q{prompt_index[prompt]}"
+        marker_lines = marker_blocks.get(question_id.upper())
+        if marker_lines is not None:
+            flat = _strip_submission_markers(marker_lines)
+        else:
+            blocks = answer_blocks.get(prompt)
+            flat = []
+            for block in blocks or []:
+                flat.extend(block)
         flat = _strip_submission_markers(flat)
         answers.append({
-            "question_id": f"Q{prompt_index[prompt]}",
-            "template_question_id": f"Q{prompt_index[prompt]}",
+            "question_id": question_id,
+            "template_question_id": question_id,
             "prompt": prompt,
             "marks_label": _extract_marks_label(prompt),
             "answer": "\n".join(flat),

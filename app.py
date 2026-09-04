@@ -76,11 +76,15 @@ CODE_PATTERN = re.compile(r"^[A-Z]{6}$")
 OLLAMA_ENDPOINT = os.environ.get("OLLAMA_ENDPOINT", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
 MARKING_TEXT_PREVIEW_EXTENSIONS = {".mod", ".run", ".dat"}
+MARKING_AMPL_PREVIEW_TEXT_EXTENSIONS = {".mod", ".run", ".dat", ".json", ".txt", ".log"}
 MARKING_TEXT_PREVIEW_MAX_BYTES = int(os.environ.get("MARKING_TEXT_PREVIEW_MAX_BYTES", str(2 * 1024 * 1024)))
+MARKING_AMPL_OVERVIEW_SENTINEL = "__ampl_all_files__"
 MARKING_DOCUMENT_PREVIEW_EXTENSIONS = {".pdf", ".docx"}
 MARKING_VIDEO_PREVIEW_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".wmv"}
 MARKING_DOCX_PREVIEW_MAX_PARAGRAPHS = int(os.environ.get("MARKING_DOCX_PREVIEW_MAX_PARAGRAPHS", "900"))
 MARKING_DOCX_PDF_PREVIEW_DIR = "marking_pdf_previews"
+MARKING_VIDEO_PREVIEW_DIR = "marking_video_previews"
+MARKING_VIDEO_TRANSCODE_ENABLED = os.environ.get("MARKING_VIDEO_TRANSCODE_ENABLED", "1").strip().lower() not in {"0", "false", "no"}
 MARKING_DOCX_PDF_CONVERTER = str(
     os.environ.get(
         "MARKING_DOCX_PDF_CONVERTER",
@@ -566,6 +570,81 @@ def _ensure_docx_pdf_preview(submission_record, relative_path, source_path):
     return output_path
 
 
+def _video_preview_output_path(submission_record, relative_path, source_path):
+    metadata_folder = _submission_metadata_folder(submission_record)
+    if not metadata_folder:
+        return None
+
+    preview_dir = metadata_folder / MARKING_VIDEO_PREVIEW_DIR
+    preview_dir.mkdir(parents=True, exist_ok=True)
+
+    source_stat = source_path.stat()
+    source_signature = f"{relative_path}|{int(source_stat.st_mtime)}|{source_stat.st_size}"
+    digest = hashlib.sha1(source_signature.encode("utf-8")).hexdigest()[:12]
+    base_name = secure_filename(Path(relative_path).stem) or "video"
+    return preview_dir / f"{base_name}_{digest}.mp4"
+
+
+def _convert_video_to_mp4_with_ffmpeg(source_video, target_mp4):
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if not ffmpeg_bin:
+        raise RuntimeError(
+            "ffmpeg is required for video fallback conversion. Install ffmpeg and restart the app."
+        )
+
+    output_dir = target_mp4.parent
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    command = [
+        ffmpeg_bin,
+        "-y",
+        "-i",
+        str(source_video),
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "23",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        str(target_mp4),
+    ]
+    completed = subprocess.run(command, capture_output=True, text=True)
+    if completed.returncode != 0:
+        details = completed.stderr.strip() or completed.stdout.strip() or "unknown ffmpeg error"
+        raise RuntimeError(f"ffmpeg conversion failed: {details}")
+
+    if not target_mp4.exists() or target_mp4.stat().st_size == 0:
+        raise RuntimeError("ffmpeg did not produce a valid MP4 output.")
+
+
+def _ensure_video_mp4_preview(submission_record, relative_path, source_path):
+    output_path = _video_preview_output_path(submission_record, relative_path, source_path)
+    if not output_path:
+        raise RuntimeError("Could not determine metadata folder for video preview output.")
+
+    if output_path.exists():
+        return output_path
+
+    temp_output = output_path.with_suffix(".tmp.mp4")
+    if temp_output.exists():
+        try:
+            temp_output.unlink()
+        except OSError:
+            pass
+
+    _convert_video_to_mp4_with_ffmpeg(source_path, temp_output)
+    temp_output.replace(output_path)
+    return output_path
+
+
 def _find_submission_run_path(submission_record, run_filename):
     candidates = []
     for file_record in submission_record.get("files", []):
@@ -664,6 +743,331 @@ def _collect_analysis_text_files_for_run(submission_record, run_record):
         add_candidate((resolved_run_path.parent / ref_path), "Referenced by run")
 
     return sorted(files, key=lambda item: item["path"].lower())
+
+
+def _collect_submission_run_files(submission_record):
+    """Return unique local .run files from a submission."""
+    run_files = []
+    seen_paths = set()
+    for file_record in submission_record.get("files", []):
+        path = Path(file_record.get("storage_location", ""))
+        if path.suffix.lower() != ".run" or path.name.startswith("."):
+            continue
+        if not path.exists() or not path.is_file():
+            continue
+        resolved = path.resolve()
+        if resolved in seen_paths:
+            continue
+        seen_paths.add(resolved)
+        run_files.append(resolved)
+    return run_files
+
+
+def _run_ampl_analysis_for_submission(submission_record):
+    """Execute all local .run files for one submission and record analysis runs."""
+    run_files = _collect_submission_run_files(submission_record)
+    if not run_files:
+        return {
+            "ran_files": 0,
+            "completed": 0,
+            "failed": 0,
+            "timed_out": 0,
+        }
+
+    timeout_seconds = int(os.environ.get("AMPL_RUN_TIMEOUT_SECONDS", "120"))
+    runner = Path(__file__).parent / "src" / "analysis_runner.py"
+    ampl_python = os.environ.get("AMPL_PYTHON", sys.executable)
+    submission_root = run_files[0].parents[1]
+    result_root = submission_root / "analysis"
+
+    completed_count = 0
+    failed_count = 0
+    timed_out_count = 0
+
+    for run_path in run_files:
+        result_directory = result_root / secure_filename(run_path.stem)
+        result_directory.mkdir(parents=True, exist_ok=True)
+        run_id = db.create_analysis_run(
+            submission_record["id"], run_path.name, str(result_directory)
+        )
+        result = {}
+        status = "failed"
+        try:
+            completed = subprocess.run(
+                [ampl_python, str(runner), str(run_path), str(run_path.parent), str(result_directory)],
+                capture_output=True,
+                text=True,
+                timeout=timeout_seconds,
+                check=False,
+            )
+            try:
+                result = json.loads(completed.stdout.strip().splitlines()[-1])
+            except (json.JSONDecodeError, IndexError):
+                result = {
+                    "stderr": completed.stderr,
+                    "error": "The AMPL worker returned an invalid result.",
+                    "statistics": {},
+                }
+            status = "completed" if result.get("status") == "completed" else "failed"
+        except subprocess.TimeoutExpired as error:
+            timeout_stdout = error.stdout or ""
+            timeout_stderr = error.stderr or ""
+            if isinstance(timeout_stdout, bytes):
+                timeout_stdout = timeout_stdout.decode(errors="replace")
+            if isinstance(timeout_stderr, bytes):
+                timeout_stderr = timeout_stderr.decode(errors="replace")
+            result = {
+                "error": f"AMPL execution exceeded the {timeout_seconds}-second timeout.",
+                "stdout": timeout_stdout,
+                "stderr": timeout_stderr,
+                "statistics": {},
+            }
+            status = "timed_out"
+        except OSError as error:
+            result = {
+                "error": f"Could not start AMPL Python interpreter '{ampl_python}'.",
+                "stderr": str(error),
+                "statistics": {},
+                "diagnostics": {"python_executable": ampl_python},
+            }
+            status = "failed"
+
+        db.update_analysis_run(run_id, status, result)
+        if status == "completed":
+            completed_count += 1
+        elif status == "timed_out":
+            timed_out_count += 1
+        else:
+            failed_count += 1
+
+    return {
+        "ran_files": len(run_files),
+        "completed": completed_count,
+        "failed": failed_count,
+        "timed_out": timed_out_count,
+    }
+
+
+def _collect_marking_ampl_preview_files(submission_record, question_id=None):
+    """Collect AMPL resources for right-pane dropdown in preferred review order.
+
+    Order per area: results, mod, data, run-script.
+    """
+    submission_root = _submission_root_folder(submission_record)
+    if not submission_root:
+        return []
+
+    try:
+        resolved_root = submission_root.resolve()
+    except OSError:
+        return []
+
+    file_lookup = {}
+    for file_record in submission_record.get("files", []):
+        area_key = file_record.get("area_key")
+        if question_id and not _area_applies_to_question(area_key, question_id):
+            continue
+        path = Path(file_record.get("storage_location", ""))
+        if not path.exists() or not path.is_file():
+            continue
+        try:
+            relative_path = path.resolve().relative_to(resolved_root).as_posix()
+        except (OSError, ValueError):
+            continue
+        file_lookup[relative_path] = file_record
+
+    latest_runs = {}
+    for run in submission_record.get("analysis_runs", []):
+        run_name = run.get("run_filename")
+        if not run_name or run_name in latest_runs:
+            continue
+        latest_runs[run_name] = run
+
+    entries = []
+    seen = set()
+
+    def add_entry(path_obj, area_label, order, label_suffix):
+        try:
+            resolved = path_obj.resolve()
+            relative_path = resolved.relative_to(resolved_root).as_posix()
+        except (OSError, ValueError):
+            return
+
+        if relative_path in seen:
+            return
+        if not resolved.exists() or not resolved.is_file():
+            return
+        if resolved.suffix.lower() not in MARKING_AMPL_PREVIEW_TEXT_EXTENSIONS:
+            return
+
+        seen.add(relative_path)
+        entries.append({
+            "path": relative_path,
+            "label": f"{area_label}: {resolved.name} [{label_suffix}]",
+            "order": order,
+            "area_label": area_label.lower(),
+            "mode": "text",
+        })
+
+    for run_path in _collect_submission_run_files(submission_record):
+        run_record = latest_runs.get(run_path.name, {})
+
+        run_relative = run_path.resolve().relative_to(resolved_root).as_posix()
+        file_meta = file_lookup.get(run_relative, {})
+        area_label = file_meta.get("area_label") or file_meta.get("area_key") or "AMPL"
+
+        result_location = Path(run_record.get("result_location", ""))
+        if str(result_location):
+            add_entry(result_location / "result.json", area_label, 0, "results")
+
+        referenced = _collect_analysis_text_files_for_run(
+            submission_record,
+            {"run_filename": run_path.name},
+        )
+        for item in referenced:
+            candidate = resolved_root / item["path"]
+            suffix = candidate.suffix.lower()
+            if suffix == ".mod":
+                add_entry(candidate, area_label, 1, "mod")
+            elif suffix == ".dat":
+                add_entry(candidate, area_label, 2, "data")
+            elif suffix == ".run":
+                add_entry(candidate, area_label, 3, "run-script")
+
+    return sorted(entries, key=lambda item: (item["area_label"], item["order"], item["label"].lower()))
+
+
+def _read_preview_text_content(path_obj):
+    try:
+        raw = path_obj.read_bytes()
+    except OSError:
+        return "", False
+
+    truncated = len(raw) > MARKING_TEXT_PREVIEW_MAX_BYTES
+    if truncated:
+        raw = raw[:MARKING_TEXT_PREVIEW_MAX_BYTES]
+    return raw.decode("utf-8", errors="replace"), truncated
+
+
+def _truncate_preview_text(content):
+    if not isinstance(content, str):
+        content = ""
+    raw = content.encode("utf-8", errors="replace")
+    truncated = len(raw) > MARKING_TEXT_PREVIEW_MAX_BYTES
+    if truncated:
+        raw = raw[:MARKING_TEXT_PREVIEW_MAX_BYTES]
+    return raw.decode("utf-8", errors="replace"), truncated
+
+
+def _collect_marking_ampl_overview_sections(submission_record, question_id=None):
+    """Collect grouped AMPL overview sections ordered as output, mod, data, run-script."""
+    submission_root = _submission_root_folder(submission_record)
+    if not submission_root:
+        return []
+
+    try:
+        resolved_root = submission_root.resolve()
+    except OSError:
+        return []
+
+    file_lookup = {}
+    for file_record in submission_record.get("files", []):
+        area_key = file_record.get("area_key")
+        if question_id and not _area_applies_to_question(area_key, question_id):
+            continue
+        path = Path(file_record.get("storage_location", ""))
+        if not path.exists() or not path.is_file():
+            continue
+        try:
+            relative_path = path.resolve().relative_to(resolved_root).as_posix()
+        except (OSError, ValueError):
+            continue
+        file_lookup[relative_path] = file_record
+
+    latest_runs = {}
+    for run in submission_record.get("analysis_runs", []):
+        run_name = run.get("run_filename")
+        if not run_name or run_name in latest_runs:
+            continue
+        latest_runs[run_name] = run
+
+    sections = []
+    for run_path in _collect_submission_run_files(submission_record):
+        try:
+            run_relative = run_path.resolve().relative_to(resolved_root).as_posix()
+        except (OSError, ValueError):
+            continue
+
+        file_meta = file_lookup.get(run_relative, {})
+        area_label = file_meta.get("area_label") or file_meta.get("area_key") or "AMPL"
+        run_record = latest_runs.get(run_path.name, {})
+
+        output_lines = []
+        status = run_record.get("status")
+        if status:
+            output_lines.append(f"status: {status}")
+        if run_record.get("duration_seconds") is not None:
+            output_lines.append(f"duration_seconds: {run_record.get('duration_seconds')}")
+
+        stdout = run_record.get("stdout") or ""
+        stderr = run_record.get("stderr") or ""
+        error_text = run_record.get("error") or ""
+        if stdout:
+            output_lines.extend(["", "stdout:", stdout])
+        if stderr:
+            output_lines.extend(["", "stderr:", stderr])
+        if error_text and error_text not in stderr:
+            output_lines.extend(["", "error:", str(error_text)])
+        if not output_lines:
+            output_lines.append("No AMPL output has been recorded yet for this run file.")
+
+        output_content, output_truncated = _truncate_preview_text("\n".join(output_lines))
+
+        file_by_kind = {}
+        referenced = _collect_analysis_text_files_for_run(
+            submission_record,
+            {"run_filename": run_path.name},
+        )
+        for item in referenced:
+            candidate = resolved_root / item["path"]
+            suffix = candidate.suffix.lower()
+            if suffix == ".mod" and "mod" not in file_by_kind:
+                file_by_kind["mod"] = candidate
+            elif suffix == ".dat" and "data" not in file_by_kind:
+                file_by_kind["data"] = candidate
+            elif suffix == ".run" and "run-script" not in file_by_kind:
+                file_by_kind["run-script"] = candidate
+
+        ordered_files = []
+        for kind in ("mod", "data", "run-script"):
+            candidate = file_by_kind.get(kind)
+            if not candidate:
+                continue
+            content, truncated = _read_preview_text_content(candidate)
+            try:
+                relative_path = candidate.resolve().relative_to(resolved_root).as_posix()
+            except (OSError, ValueError):
+                relative_path = candidate.name
+            ordered_files.append({
+                "kind": kind,
+                "name": candidate.name,
+                "path": relative_path,
+                "content": content,
+                "truncated": truncated,
+            })
+
+        sections.append({
+            "area_label": area_label,
+            "run_filename": run_path.name,
+            "output": {
+                "content": output_content,
+                "truncated": output_truncated,
+            },
+            "files": ordered_files,
+        })
+
+    sections.sort(key=lambda item: (item["area_label"].lower(), item["run_filename"].lower()))
+    return sections
 
 
 def _load_marking_previews(submission_record):
@@ -1639,74 +2043,18 @@ def admin_submission_analysis(submission_id):
         abort(404)
 
     if request.method == "POST":
-        run_files = []
-        seen_paths = set()
-        for file in submission["files"]:
-            path = Path(file["storage_location"])
-            if path.suffix.lower() == ".run" and not path.name.startswith(".") and path.exists():
-                resolved = path.resolve()
-                if resolved not in seen_paths:
-                    run_files.append(resolved)
-                    seen_paths.add(resolved)
-
-        if not run_files:
+        summary = _run_ampl_analysis_for_submission(submission)
+        if summary["ran_files"] == 0:
             flash("No runnable .run files were found in this submission.")
             return redirect(url_for("admin_submission_analysis", submission_id=submission_id))
 
-        timeout_seconds = int(os.environ.get("AMPL_RUN_TIMEOUT_SECONDS", "120"))
-        runner = Path(__file__).parent / "src" / "analysis_runner.py"
-        ampl_python = os.environ.get("AMPL_PYTHON", sys.executable)
-        submission_root = run_files[0].parents[1]
-        result_root = submission_root / "analysis"
-        for run_path in run_files:
-            result_directory = result_root / secure_filename(run_path.stem)
-            result_directory.mkdir(parents=True, exist_ok=True)
-            run_id = db.create_analysis_run(
-                submission_id, run_path.name, str(result_directory)
-            )
-            result = {}
-            try:
-                completed = subprocess.run(
-                    [ampl_python, str(runner), str(run_path), str(run_path.parent), str(result_directory)],
-                    capture_output=True,
-                    text=True,
-                    timeout=timeout_seconds,
-                    check=False,
-                )
-                try:
-                    result = json.loads(completed.stdout.strip().splitlines()[-1])
-                except (json.JSONDecodeError, IndexError):
-                    result = {
-                        "stderr": completed.stderr,
-                        "error": "The AMPL worker returned an invalid result.",
-                        "statistics": {},
-                    }
-                status = "completed" if result.get("status") == "completed" else "failed"
-            except subprocess.TimeoutExpired as error:
-                timeout_stdout = error.stdout or ""
-                timeout_stderr = error.stderr or ""
-                if isinstance(timeout_stdout, bytes):
-                    timeout_stdout = timeout_stdout.decode(errors="replace")
-                if isinstance(timeout_stderr, bytes):
-                    timeout_stderr = timeout_stderr.decode(errors="replace")
-                result = {
-                    "error": f"AMPL execution exceeded the {timeout_seconds}-second timeout.",
-                    "stdout": timeout_stdout,
-                    "stderr": timeout_stderr,
-                    "statistics": {},
-                }
-                status = "timed_out"
-            except OSError as error:
-                result = {
-                    "error": f"Could not start AMPL Python interpreter '{ampl_python}'.",
-                    "stderr": str(error),
-                    "statistics": {},
-                    "diagnostics": {"python_executable": ampl_python},
-                }
-                status = "failed"
-            db.update_analysis_run(run_id, status, result)
-
-        flash(f"AMPL analysis completed for {len(run_files)} run file(s).")
+        flash(
+            "AMPL analysis finished: "
+            f"{summary['completed']} completed, "
+            f"{summary['failed']} failed, "
+            f"{summary['timed_out']} timed out "
+            f"across {summary['ran_files']} run file(s)."
+        )
         return redirect(url_for("admin_submission_analysis", submission_id=submission_id))
 
     analysis_text_files_by_run = {
@@ -1719,6 +2067,87 @@ def admin_submission_analysis(submission_id):
         submission=submission,
         analysis_text_files_by_run=analysis_text_files_by_run,
         form_version=SUBMISSION_CONFIG.get("form_version"),
+    )
+
+
+@app.route("/admin/submission/<int:submission_id>/analysis/run", methods=["POST"])
+@login_required
+def admin_run_submission_analysis(submission_id):
+    submission = db.get_submission(submission_id)
+    if not submission:
+        abort(404)
+
+    summary = _run_ampl_analysis_for_submission(submission)
+    if summary["ran_files"] == 0:
+        flash(f"No runnable .run files were found for submission #{submission_id}.")
+    else:
+        flash(
+            f"Submission #{submission_id} AMPL rerun finished: "
+            f"{summary['completed']} completed, {summary['failed']} failed, "
+            f"{summary['timed_out']} timed out across {summary['ran_files']} run file(s)."
+        )
+
+    return_to = request.form.get("return_to", "dashboard").strip().lower()
+    search = request.form.get("q", "").strip()
+    marking_filter = request.form.get("marking", "all").strip().lower()
+    sort_key = request.form.get("sort", "submitted_at").strip().lower()
+    sort_dir = request.form.get("dir", "desc").strip().lower()
+
+    if return_to == "analysis":
+        return redirect(url_for("admin_submission_analysis", submission_id=submission_id))
+
+    return redirect(
+        url_for(
+            "admin_dashboard",
+            q=search,
+            marking=marking_filter,
+            sort=sort_key,
+            dir=sort_dir,
+        )
+    )
+
+
+@app.route("/admin/submissions/analysis/rerun-all", methods=["POST"])
+@login_required
+def admin_rerun_analysis_all_submissions():
+    search = request.form.get("q", "").strip()
+    marking_filter = request.form.get("marking", "all").strip().lower()
+    sort_key = request.form.get("sort", "submitted_at").strip().lower()
+    sort_dir = request.form.get("dir", "desc").strip().lower()
+
+    total_runs = 0
+    submissions_with_runs = 0
+    failures = 0
+    timeouts = 0
+
+    for item in db.list_submissions(marking_filter="all"):
+        submission = db.get_submission(item["id"])
+        if not submission:
+            continue
+        summary = _run_ampl_analysis_for_submission(submission)
+        if summary["ran_files"] > 0:
+            submissions_with_runs += 1
+            total_runs += summary["ran_files"]
+            failures += summary["failed"]
+            timeouts += summary["timed_out"]
+
+    if submissions_with_runs == 0:
+        flash("No runnable .run files were found in the current dataset.")
+    else:
+        flash(
+            "AMPL rerun across all submissions finished: "
+            f"{submissions_with_runs} submission(s), {total_runs} run file(s), "
+            f"{failures} failed, {timeouts} timed out."
+        )
+
+    return redirect(
+        url_for(
+            "admin_dashboard",
+            q=search,
+            marking=marking_filter,
+            sort=sort_key,
+            dir=sort_dir,
+        )
     )
 
 
@@ -1855,6 +2284,10 @@ def admin_submission_marking(submission_id):
     if view_mode not in {"student", "question"}:
         view_mode = "student"
     show_only_unmarked = request.args.get("unmarked", "0").strip().lower() in {"1", "true", "yes"}
+    dashboard_search = request.args.get("q", "").strip()
+    dashboard_marking_filter = request.args.get("marking", "all").strip().lower()
+    dashboard_sort_key = request.args.get("sort", "submitted_at").strip().lower()
+    dashboard_sort_dir = request.args.get("dir", "desc").strip().lower()
 
     def assessment_has_marking(assessment_record):
         if not assessment_record:
@@ -1975,7 +2408,18 @@ def admin_submission_marking(submission_id):
 
     can_reextract = not db.has_marking_assessments(submission_id)
 
-    included_submissions = db.list_submissions(marking_filter="included")
+    dashboard_context = _build_dashboard_context(
+        search=dashboard_search,
+        marking_filter=dashboard_marking_filter,
+        sort_key=dashboard_sort_key,
+        sort_dir=dashboard_sort_dir,
+    )
+    dashboard_sorted = dashboard_context.get("submissions", [])
+
+    # Marking views only navigate across submissions currently in the marking pool.
+    included_submissions = [item for item in dashboard_sorted if not item.get("marking_excluded")]
+    if not included_submissions:
+        included_submissions = db.list_submissions(marking_filter="included")
     submission_ids = [item["id"] for item in included_submissions]
     submission_is_excluded = bool(submission.get("marking_excluded"))
 
@@ -2000,6 +2444,10 @@ def admin_submission_marking(submission_id):
                 submission_id=unmarked_submission_ids[0],
                 view="student",
                 unmarked="1",
+                q=dashboard_search or None,
+                marking=dashboard_marking_filter,
+                sort=dashboard_sort_key,
+                dir=dashboard_sort_dir,
             )
         )
 
@@ -2109,7 +2557,31 @@ def admin_submission_marking(submission_id):
     active_question_for_files = selected_question if view_mode == "question" else None
     marking_text_files = _collect_marking_text_files(marking_text_submission, question_id=active_question_for_files)
     marking_document_files = _collect_marking_document_files(marking_text_submission, question_id=active_question_for_files)
+    marking_ampl_preview_files = _collect_marking_ampl_preview_files(
+        marking_text_submission,
+        question_id=active_question_for_files,
+    )
     marking_document_options = []
+
+    for item in marking_ampl_preview_files:
+        marking_document_options.append({
+            "path": item["path"],
+            "mode": item.get("mode", "text"),
+            "label": item["label"],
+            "priority": 0,
+        })
+
+    marking_ampl_overview_sections = _collect_marking_ampl_overview_sections(
+        marking_text_submission,
+        question_id=active_question_for_files,
+    )
+    if marking_ampl_overview_sections:
+        marking_document_options.append({
+            "path": MARKING_AMPL_OVERVIEW_SENTINEL,
+            "mode": "ampl_overview",
+            "label": "AMPL ALL FILES [Overview]",
+            "priority": -1,
+        })
 
     for item in marking_document_files:
         extension = item.get("extension", "")
@@ -2118,27 +2590,27 @@ def admin_submission_marking(submission_id):
                 "path": item["path"],
                 "mode": "video",
                 "label": f"{item['label']} [Video]",
-                "priority": 0,
+                "priority": 10,
             })
         elif extension == ".pdf":
             marking_document_options.append({
                 "path": item["path"],
                 "mode": "pdf",
                 "label": f"{item['label']} [PDF]",
-                "priority": 1,
+                "priority": 11,
             })
         elif extension == ".docx":
             marking_document_options.append({
                 "path": item["path"],
                 "mode": "converted_pdf",
                 "label": f"{item['label']} [PDF preview]",
-                "priority": 2,
+                "priority": 12,
             })
             marking_document_options.append({
                 "path": item["path"],
                 "mode": "docx",
                 "label": f"{item['label']} [DOCX view]",
-                "priority": 3,
+                "priority": 13,
             })
 
     marking_document_options.sort(key=lambda item: (item["priority"], item["label"].lower()))
@@ -2158,6 +2630,10 @@ def admin_submission_marking(submission_id):
         submission=submission,
         submission_is_excluded=submission_is_excluded,
         view_mode=view_mode,
+        dashboard_search=dashboard_search,
+        dashboard_marking_filter=dashboard_marking_filter,
+        dashboard_sort_key=dashboard_sort_key,
+        dashboard_sort_dir=dashboard_sort_dir,
         previews=previews,
         question_ids=question_ids,
         selected_question=selected_question,
@@ -2242,13 +2718,25 @@ def admin_marking_document_preview(submission_id):
     if not submission:
         abort(404)
 
-    relative_path = request.args.get("path", "").strip()
     preview_mode = request.args.get("mode", "").strip().lower()
+
+    if preview_mode == "ampl_overview":
+        question_id = request.args.get("question_id", "").strip() or None
+        sections = _collect_marking_ampl_overview_sections(submission, question_id=question_id)
+        return render_template(
+            "admin_marking_ampl_overview.html",
+            sections=sections,
+            max_bytes=MARKING_TEXT_PREVIEW_MAX_BYTES,
+        )
+
+    relative_path = request.args.get("path", "").strip()
     if not relative_path:
         abort(400, "Missing file path.")
 
     document_entries = _collect_marking_document_files(submission)
+    ampl_entries = _collect_marking_ampl_preview_files(submission)
     allowed_paths = {entry["path"] for entry in document_entries}
+    allowed_paths.update(entry["path"] for entry in ampl_entries)
     if relative_path not in allowed_paths:
         abort(404, "Requested file is not available for preview.")
 
@@ -2257,16 +2745,56 @@ def admin_marking_document_preview(submission_id):
         abort(404, "File does not exist.")
 
     extension = candidate.suffix.lower()
+    if preview_mode == "text":
+        if extension not in MARKING_AMPL_PREVIEW_TEXT_EXTENSIONS:
+            abort(400, "Only text-based AMPL resources are supported in this view.")
+
+        try:
+            raw = candidate.read_bytes()
+        except OSError as error:
+            abort(500, f"Could not read file: {escape(str(error))}")
+
+        truncated = len(raw) > MARKING_TEXT_PREVIEW_MAX_BYTES
+        if truncated:
+            raw = raw[:MARKING_TEXT_PREVIEW_MAX_BYTES]
+
+        content = raw.decode("utf-8", errors="replace")
+        return render_template(
+            "admin_marking_text_preview.html",
+            file_name=candidate.name,
+            file_path=relative_path,
+            content=content,
+            truncated=truncated,
+            max_bytes=MARKING_TEXT_PREVIEW_MAX_BYTES,
+        )
+
     if extension in MARKING_VIDEO_PREVIEW_EXTENSIONS:
         if preview_mode in {"", "video"}:
             media_url = url_for("admin_marking_document_media", submission_id=submission_id, path=relative_path)
             media_type = mimetypes.guess_type(candidate.name)[0] or "video/mp4"
+            converted_media_url = ""
+            transcode_hint = ""
+            if MARKING_VIDEO_TRANSCODE_ENABLED and extension in {".mov", ".avi", ".mkv", ".wmv", ".m4v"}:
+                converted_url = url_for(
+                    "admin_marking_document_media",
+                    submission_id=submission_id,
+                    path=relative_path,
+                    mode="converted_mp4",
+                )
+                converted_media_url = media_url
+                media_url = converted_url
+                media_type = "video/mp4"
+                transcode_hint = (
+                    "This format is previewed as a browser-safe MP4 first. If conversion fails, the player will try the original upload."
+                )
             return render_template(
                 "admin_marking_media_preview.html",
                 file_name=candidate.name,
                 file_path=relative_path,
                 media_url=media_url,
                 media_type=media_type,
+                converted_media_url=converted_media_url,
+                transcode_hint=transcode_hint,
                 media_kind="video",
                 error_message="",
             )
@@ -2319,7 +2847,7 @@ def admin_marking_document_preview(submission_id):
             error_message=docx_fallback_error,
         )
 
-    abort(400, "Only PDF and DOCX files are supported.")
+    abort(400, "Only PDF, DOCX, video, and AMPL text resources are supported.")
 
 
 @app.route("/admin/submission/<int:submission_id>/marking/media")
@@ -2330,6 +2858,7 @@ def admin_marking_document_media(submission_id):
         abort(404)
 
     relative_path = request.args.get("path", "").strip()
+    preview_mode = request.args.get("mode", "").strip().lower()
     if not relative_path:
         abort(400, "Missing file path.")
 
@@ -2345,6 +2874,15 @@ def admin_marking_document_media(submission_id):
     extension = candidate.suffix.lower()
     if extension not in MARKING_VIDEO_PREVIEW_EXTENSIONS:
         abort(400, "Only video files are supported.")
+
+    if preview_mode == "converted_mp4":
+        if not MARKING_VIDEO_TRANSCODE_ENABLED:
+            abort(404, "Video fallback conversion is disabled.")
+        try:
+            converted = _ensure_video_mp4_preview(submission, relative_path, candidate)
+        except (OSError, RuntimeError, ValueError) as error:
+            abort(503, f"Could not generate MP4 preview: {escape(str(error))}")
+        return send_file(converted, mimetype="video/mp4", as_attachment=False, download_name=f"{candidate.stem}.mp4")
 
     mimetype = mimetypes.guess_type(candidate.name)[0] or "application/octet-stream"
     return send_file(candidate, mimetype=mimetype, as_attachment=False, download_name=candidate.name)
@@ -2363,6 +2901,10 @@ def admin_save_marking_assessment(submission_id):
     view_mode = request.form.get("view", "student").strip().lower()
     selected_question = request.form.get("selected_question", "").strip()
     unmarked_only = request.form.get("unmarked", "0").strip().lower() in {"1", "true", "yes"}
+    dashboard_search = request.form.get("q", "").strip()
+    dashboard_marking_filter = request.form.get("marking", "all").strip().lower()
+    dashboard_sort_key = request.form.get("sort", "submitted_at").strip().lower()
+    dashboard_sort_dir = request.form.get("dir", "desc").strip().lower()
     question_prompt = request.form.get("question_prompt", "").strip()
     student_answer = request.form.get("student_answer", "").strip()
     marks_label = request.form.get("marks_label", "").strip()
@@ -2436,6 +2978,10 @@ def admin_save_marking_assessment(submission_id):
             view=view_mode if view_mode in {"student", "question"} else "student",
             question=selected_question or None,
             unmarked="1" if unmarked_only else None,
+            q=dashboard_search or None,
+            marking=dashboard_marking_filter,
+            sort=dashboard_sort_key,
+            dir=dashboard_sort_dir,
         )
     )
 
@@ -2451,6 +2997,10 @@ def admin_undo_marking_assessment(submission_id):
     view_mode = request.form.get("view", "student").strip().lower()
     selected_question = request.form.get("selected_question", "").strip()
     unmarked_only = request.form.get("unmarked", "0").strip().lower() in {"1", "true", "yes"}
+    dashboard_search = request.form.get("q", "").strip()
+    dashboard_marking_filter = request.form.get("marking", "all").strip().lower()
+    dashboard_sort_key = request.form.get("sort", "submitted_at").strip().lower()
+    dashboard_sort_dir = request.form.get("dir", "desc").strip().lower()
 
     if not question_id:
         flash("Question ID is required for undoing marking.")
@@ -2466,6 +3016,10 @@ def admin_undo_marking_assessment(submission_id):
             view=view_mode if view_mode in {"student", "question"} else "student",
             question=selected_question or None,
             unmarked="1" if unmarked_only else None,
+            q=dashboard_search or None,
+            marking=dashboard_marking_filter,
+            sort=dashboard_sort_key,
+            dir=dashboard_sort_dir,
         )
     )
 
@@ -2514,9 +3068,29 @@ def admin_reextract_marking_preview(submission_id):
     if not submission:
         abort(404)
 
+    view_mode = request.form.get("view", "student").strip().lower()
+    selected_question = request.form.get("selected_question", "").strip()
+    unmarked_only = request.form.get("unmarked", "0").strip().lower() in {"1", "true", "yes"}
+    dashboard_search = request.form.get("q", "").strip()
+    dashboard_marking_filter = request.form.get("marking", "all").strip().lower()
+    dashboard_sort_key = request.form.get("sort", "submitted_at").strip().lower()
+    dashboard_sort_dir = request.form.get("dir", "desc").strip().lower()
+
     if db.has_marking_assessments(submission_id):
         flash("Re-extract is blocked because marking scores/comments already exist for this submission.")
-        return redirect(url_for("admin_submission_marking", submission_id=submission_id, view="student"))
+        return redirect(
+            url_for(
+                "admin_submission_marking",
+                submission_id=submission_id,
+                view=view_mode if view_mode in {"student", "question"} else "student",
+                question=selected_question or None,
+                unmarked="1" if unmarked_only else None,
+                q=dashboard_search or None,
+                marking=dashboard_marking_filter,
+                sort=dashboard_sort_key,
+                dir=dashboard_sort_dir,
+            )
+        )
 
     extraction_areas = set(SUBMISSION_CONFIG.get("marking_extraction_areas", ["report"]))
     updated = 0
@@ -2542,7 +3116,19 @@ def admin_reextract_marking_preview(submission_id):
     else:
         flash("No eligible local DOCX files found for re-extraction.")
 
-    return redirect(url_for("admin_submission_marking", submission_id=submission_id, view="student"))
+    return redirect(
+        url_for(
+            "admin_submission_marking",
+            submission_id=submission_id,
+            view=view_mode if view_mode in {"student", "question"} else "student",
+            question=selected_question or None,
+            unmarked="1" if unmarked_only else None,
+            q=dashboard_search or None,
+            marking=dashboard_marking_filter,
+            sort=dashboard_sort_key,
+            dir=dashboard_sort_dir,
+        )
+    )
 
 
 @app.route("/admin/submission/<int:submission_id>/delete", methods=["POST"])

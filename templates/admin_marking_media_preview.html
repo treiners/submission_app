@@ -66,11 +66,14 @@ video {
   <div class="notice error">{{ error_message }}</div>
   {% else %}
   <div class="notice">Video is shown here for marking comparison and can be played directly.</div>
+  {% if transcode_hint %}
+  <div class="notice">{{ transcode_hint }}</div>
+  {% endif %}
   {% endif %}
 
   <div class="video-wrap">
     <video id="media-video" controls playsinline preload="metadata">
-      <source id="media-source" src="" type="{{ media_type }}">
+      <source id="media-source" src="{{ media_url }}" type="{{ media_type }}">
       Your browser does not support the video element.
     </video>
   </div>
@@ -78,40 +81,50 @@ video {
   <script>
   (() => {
     const mediaUrl = {{ media_url | tojson }};
+    const convertedMediaUrl = {{ converted_media_url | default('', true) | tojson }};
     const video = document.getElementById('media-video');
     const source = document.getElementById('media-source');
-    const status = document.querySelector('.notice');
-    let objectUrl = '';
+    const notices = Array.from(document.querySelectorAll('.notice'));
+    const status = notices.length ? notices[notices.length - 1] : null;
+    let attemptedFallback = false;
 
-    async function loadMedia() {
-      try {
-        const response = await fetch(mediaUrl);
-        if (!response.ok) {
-          throw new Error(`Media request failed: ${response.status}`);
-        }
-
-        const blob = await response.blob();
-        objectUrl = URL.createObjectURL(blob);
-        source.src = objectUrl;
-        video.load();
-        if (status) {
-          status.textContent = 'Video loaded. Use the player controls to play it here.';
-        }
-      } catch (error) {
-        if (status) {
-          status.textContent = error.message || 'Could not load video.';
-          status.classList.add('error');
-        }
+    function setStatus(message, isError) {
+      if (!status) {
+        return;
       }
+      status.textContent = message;
+      status.classList.toggle('error', Boolean(isError));
     }
 
-    window.addEventListener('beforeunload', () => {
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
+    function switchToFallback() {
+      if (!convertedMediaUrl || attemptedFallback) {
+        setStatus('Could not play this video in the browser. Try installing ffmpeg and use MP4 fallback.', true);
+        return;
+      }
+
+      attemptedFallback = true;
+      setStatus('Native playback failed. Trying browser-safe MP4 fallback...', false);
+      source.src = convertedMediaUrl;
+      source.type = 'video/mp4';
+      video.load();
+    }
+
+    video.addEventListener('loadedmetadata', () => {
+      if (source.src === mediaUrl) {
+        setStatus('Video loaded. Use the player controls to play it here.', false);
+      } else {
+        setStatus('Converted MP4 fallback loaded successfully.', false);
       }
     });
 
-    loadMedia();
+    video.addEventListener('error', () => {
+      switchToFallback();
+    });
+
+    if (!source.src) {
+      source.src = mediaUrl;
+      video.load();
+    }
   })();
   </script>
 </body>

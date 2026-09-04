@@ -97,6 +97,13 @@
     <a class="action-btn" href="{{ url_for('admin_export_marking_overview_xlsx') }}">Download marking (Excel, included only)</a>
     <a class="action-btn" href="{{ url_for('admin_export_marking_overview_xlsx', include_excluded=1) }}">Download marking (Excel, include excluded)</a>
     <a class="action-btn" href="{{ url_for('admin_export_marking_students_columns_xlsx') }}">Download marking (Excel, students in columns)</a>
+    <form method="POST" action="{{ url_for('admin_rerun_analysis_all_submissions') }}" onsubmit="return confirm('Rerun AMPL analysis for all submissions?');" style="display:inline-flex;">
+      <input type="hidden" name="q" value="{{ search }}">
+      <input type="hidden" name="marking" value="{{ marking_filter }}">
+      <input type="hidden" name="sort" value="{{ sort_key }}">
+      <input type="hidden" name="dir" value="{{ sort_dir }}">
+      <button type="submit" class="action-btn">Rerun AMPL for all submissions</button>
+    </form>
   </div>
 
   <form class="danger-inline-form" method="POST" action="{{ url_for('admin_delete_all_submissions') }}" onsubmit="return confirm('Delete ALL submissions and uploaded files? This cannot be undone.');">
@@ -188,8 +195,16 @@
           <div class="admin-table-actions">
             <a class="admin-table-btn" href="{{ url_for('admin_submission_detail', submission_id=s.id) }}">View</a>
             <a class="admin-table-btn" href="{{ url_for('admin_submission_metadata', submission_id=s.id) }}">Metadata</a>
+            <form method="POST" action="{{ url_for('admin_run_submission_analysis', submission_id=s.id) }}" onsubmit="return confirm('Run all .run files for this submission?');" style="display:inline-flex;">
+              <input type="hidden" name="return_to" value="dashboard">
+              <input type="hidden" name="q" value="{{ search }}">
+              <input type="hidden" name="marking" value="{{ marking_filter }}">
+              <input type="hidden" name="sort" value="{{ sort_key }}">
+              <input type="hidden" name="dir" value="{{ sort_dir }}">
+              <button type="submit" class="admin-table-btn">Run AMPL</button>
+            </form>
             {% if not s.marking_excluded %}
-            <a class="admin-table-btn" href="{{ url_for('admin_submission_marking', submission_id=s.id) }}">Marking</a>
+            <a class="admin-table-btn" href="{{ url_for('admin_submission_marking', submission_id=s.id, q=search or None, marking=marking_filter, sort=sort_key, dir=sort_dir) }}">Marking</a>
             {% endif %}
           </div>
         </td>

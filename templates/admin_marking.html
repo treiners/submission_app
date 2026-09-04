@@ -40,6 +40,13 @@
           <span class="action-btn active">View marking preview</span>
           <a class="action-btn" href="{{ url_for('admin_submission_analysis', submission_id=submission.id) }}">View AMPL analysis</a>
           <form method="POST" action="{{ url_for('admin_reextract_marking_preview', submission_id=submission.id) }}" class="reextract-form reextract-header-form">
+            <input type="hidden" name="view" value="{{ view_mode }}">
+            <input type="hidden" name="selected_question" value="{{ selected_question or '' }}">
+            <input type="hidden" name="unmarked" value="{{ '1' if show_only_unmarked else '0' }}">
+            <input type="hidden" name="q" value="{{ dashboard_search }}">
+            <input type="hidden" name="marking" value="{{ dashboard_marking_filter }}">
+            <input type="hidden" name="sort" value="{{ dashboard_sort_key }}">
+            <input type="hidden" name="dir" value="{{ dashboard_sort_dir }}">
             <button type="submit" class="action-btn reextract-action-btn" {% if not can_reextract %}disabled{% endif %}>Re-extract marking preview</button>
           </form>
         </div>
@@ -47,13 +54,13 @@
         {% if view_mode == 'student' %}
         <div class="marking-nav marking-nav-header">
           {% if prev_submission_id %}
-            <a class="marking-nav-link" data-nav-role="prev" href="{{ url_for('admin_submission_marking', submission_id=prev_submission_id, view='student', unmarked=('1' if show_only_unmarked else None)) }}">&larr; Previous submission</a>
+            <a class="marking-nav-link" data-nav-role="prev" href="{{ url_for('admin_submission_marking', submission_id=prev_submission_id, view='student', unmarked=('1' if show_only_unmarked else None), q=dashboard_search or None, marking=dashboard_marking_filter, sort=dashboard_sort_key, dir=dashboard_sort_dir) }}">&larr; Previous submission</a>
           {% else %}
             <span class="marking-nav-disabled">&larr; Previous submission</span>
           {% endif %}
 
           {% if next_submission_id %}
-            <a class="marking-nav-link" data-nav-role="next" href="{{ url_for('admin_submission_marking', submission_id=next_submission_id, view='student', unmarked=('1' if show_only_unmarked else None)) }}">Next submission &rarr;</a>
+            <a class="marking-nav-link" data-nav-role="next" href="{{ url_for('admin_submission_marking', submission_id=next_submission_id, view='student', unmarked=('1' if show_only_unmarked else None), q=dashboard_search or None, marking=dashboard_marking_filter, sort=dashboard_sort_key, dir=dashboard_sort_dir) }}">Next submission &rarr;</a>
           {% else %}
             <span class="marking-nav-disabled">Next submission &rarr;</span>
           {% endif %}
@@ -62,13 +69,13 @@
         {% elif view_mode == 'question' and question_entry and not question_all_marked %}
         <div class="marking-nav marking-nav-header">
           {% if question_prev_submission_id %}
-            <a class="marking-nav-link" data-nav-role="prev" href="{{ url_for('admin_submission_marking', submission_id=question_prev_submission_id, view='question', question=selected_question, unmarked=('1' if show_only_unmarked else None)) }}">&larr; Previous student</a>
+            <a class="marking-nav-link" data-nav-role="prev" href="{{ url_for('admin_submission_marking', submission_id=question_prev_submission_id, view='question', question=selected_question, unmarked=('1' if show_only_unmarked else None), q=dashboard_search or None, marking=dashboard_marking_filter, sort=dashboard_sort_key, dir=dashboard_sort_dir) }}">&larr; Previous student</a>
           {% else %}
             <span class="marking-nav-disabled">&larr; Previous student</span>
           {% endif %}
 
           {% if question_next_submission_id %}
-            <a class="marking-nav-link" data-nav-role="next" href="{{ url_for('admin_submission_marking', submission_id=question_next_submission_id, view='question', question=selected_question, unmarked=('1' if show_only_unmarked else None)) }}">Next student &rarr;</a>
+            <a class="marking-nav-link" data-nav-role="next" href="{{ url_for('admin_submission_marking', submission_id=question_next_submission_id, view='question', question=selected_question, unmarked=('1' if show_only_unmarked else None), q=dashboard_search or None, marking=dashboard_marking_filter, sort=dashboard_sort_key, dir=dashboard_sort_dir) }}">Next student &rarr;</a>
           {% else %}
             <span class="marking-nav-disabled">Next student &rarr;</span>
           {% endif %}
@@ -90,12 +97,20 @@
           <form method="GET" action="{{ url_for('admin_submission_marking', submission_id=submission.id) }}">
             <input type="hidden" name="view" value="student">
             {% if show_only_unmarked %}<input type="hidden" name="unmarked" value="1">{% endif %}
+            <input type="hidden" name="q" value="{{ dashboard_search }}">
+            <input type="hidden" name="marking" value="{{ dashboard_marking_filter }}">
+            <input type="hidden" name="sort" value="{{ dashboard_sort_key }}">
+            <input type="hidden" name="dir" value="{{ dashboard_sort_dir }}">
             <button type="submit" class="marking-tab-btn {% if view_mode == 'student' %}active{% endif %}">Per student</button>
           </form>
           <form method="GET" action="{{ url_for('admin_submission_marking', submission_id=submission.id) }}">
             <input type="hidden" name="view" value="question">
             <input type="hidden" name="question" value="{{ selected_question or '' }}">
             {% if show_only_unmarked %}<input type="hidden" name="unmarked" value="1">{% endif %}
+            <input type="hidden" name="q" value="{{ dashboard_search }}">
+            <input type="hidden" name="marking" value="{{ dashboard_marking_filter }}">
+            <input type="hidden" name="sort" value="{{ dashboard_sort_key }}">
+            <input type="hidden" name="dir" value="{{ dashboard_sort_dir }}">
             <button type="submit" class="marking-tab-btn {% if view_mode == 'question' %}active{% endif %}">Per question</button>
           </form>
           <label class="marking-auto-toggle">
@@ -107,6 +122,10 @@
             {% if view_mode == 'question' %}
             <input type="hidden" name="question" value="{{ selected_question or '' }}">
             {% endif %}
+            <input type="hidden" name="q" value="{{ dashboard_search }}">
+            <input type="hidden" name="marking" value="{{ dashboard_marking_filter }}">
+            <input type="hidden" name="sort" value="{{ dashboard_sort_key }}">
+            <input type="hidden" name="dir" value="{{ dashboard_sort_dir }}">
             <label class="marking-auto-toggle">
               <input type="checkbox" name="unmarked" value="1" {% if show_only_unmarked %}checked{% endif %} onchange="this.form.submit()">
               Show only unmarked
@@ -163,6 +182,10 @@
       <input type="hidden" name="question_id" value="{{ answer.question_id }}">
       <input type="hidden" name="view" value="student">
       <input type="hidden" name="unmarked" value="{{ '1' if show_only_unmarked else '0' }}">
+      <input type="hidden" name="q" value="{{ dashboard_search }}">
+      <input type="hidden" name="marking" value="{{ dashboard_marking_filter }}">
+      <input type="hidden" name="sort" value="{{ dashboard_sort_key }}">
+      <input type="hidden" name="dir" value="{{ dashboard_sort_dir }}">
       <input type="hidden" name="question_prompt" value="{{ answer.template_prompt or answer.prompt }}">
       <input type="hidden" name="student_answer" value="{{ answer.answer }}">
       <input type="hidden" name="marks_label" value="{{ answer.marks_label or '' }}">
@@ -269,7 +292,7 @@
     <div class="question-bar">
       {% for qid in question_ids %}
       <a class="question-pill {% if qid == selected_question %}active{% endif %}"
-         href="{{ url_for('admin_submission_marking', submission_id=(question_entry.submission_id if question_entry else submission.id), view='question', question=qid, unmarked=('1' if show_only_unmarked else None)) }}">{{ qid }}</a>
+        href="{{ url_for('admin_submission_marking', submission_id=(question_entry.submission_id if question_entry else submission.id), view='question', question=qid, unmarked=('1' if show_only_unmarked else None), q=dashboard_search or None, marking=dashboard_marking_filter, sort=dashboard_sort_key, dir=dashboard_sort_dir) }}">{{ qid }}</a>
       {% endfor %}
     </div>
     {% endif %}
@@ -322,6 +345,10 @@
       <input type="hidden" name="view" value="question">
       <input type="hidden" name="unmarked" value="{{ '1' if show_only_unmarked else '0' }}">
       <input type="hidden" name="selected_question" value="{{ selected_question }}">
+      <input type="hidden" name="q" value="{{ dashboard_search }}">
+      <input type="hidden" name="marking" value="{{ dashboard_marking_filter }}">
+      <input type="hidden" name="sort" value="{{ dashboard_sort_key }}">
+      <input type="hidden" name="dir" value="{{ dashboard_sort_dir }}">
       <input type="hidden" name="question_prompt" value="{{ question_entry.answer.template_prompt or question_entry.answer.prompt }}">
       <input type="hidden" name="student_answer" value="{{ question_entry.answer.answer }}">
       <input type="hidden" name="marks_label" value="{{ question_entry.answer.marks_label or '' }}">
@@ -438,7 +465,7 @@
           <iframe id="marking-doc-frame" title="Original submission preview"></iframe>
         </div>
         <p class="hint" style="margin-top:10px;">
-          PDF is shown by default. Choose DOCX view or Video playback from the selector when needed.
+          PDF is shown by default. Choose AMPL ALL FILES for an output/mod/data/run overview, or pick individual AMPL files, DOCX view, and Video playback when needed.
         </p>
         {% else %}
         <p class="subtitle" style="margin:0; font-size:0.84rem;">
@@ -476,6 +503,7 @@
   const markingWorkspace = document.querySelector('.marking-workspace');
   const markingDivider = document.getElementById('marking-divider');
   const markingResizeStorageKey = 'markingWorkspaceSplitPct';
+  const markingDocSelectionStorageKey = 'markingDocSelection';
   const minLeftPct = 22;
   const maxLeftPct = 55;
   let markingSplitPct = 34;
@@ -639,6 +667,59 @@
     }
   }
 
+  function saveDocumentSelection(path, mode) {
+    try {
+      localStorage.setItem(markingDocSelectionStorageKey, JSON.stringify({
+        path: (path || '').trim(),
+        mode: (mode || '').trim(),
+      }));
+    } catch (_) {
+      // Ignore localStorage failures.
+    }
+  }
+
+  function restoreDocumentSelection() {
+    if (!docSelect) {
+      return;
+    }
+
+    let saved = null;
+    try {
+      const raw = localStorage.getItem(markingDocSelectionStorageKey);
+      saved = raw ? JSON.parse(raw) : null;
+    } catch (_) {
+      saved = null;
+    }
+
+    if (!saved || typeof saved !== 'object') {
+      return;
+    }
+
+    const savedPath = typeof saved.path === 'string' ? saved.path.trim() : '';
+    const savedMode = typeof saved.mode === 'string' ? saved.mode.trim() : '';
+    if (!savedPath && !savedMode) {
+      return;
+    }
+
+    const options = Array.from(docSelect.options || []);
+    const exact = options.find((opt) => {
+      const mode = ((opt.dataset && opt.dataset.mode) || '').trim();
+      return (opt.value || '').trim() === savedPath && mode === savedMode;
+    });
+
+    if (exact) {
+      docSelect.value = exact.value;
+      return;
+    }
+
+    if (savedMode) {
+      const modeMatch = options.find((opt) => (((opt.dataset && opt.dataset.mode) || '').trim() === savedMode));
+      if (modeMatch) {
+        docSelect.value = modeMatch.value;
+      }
+    }
+  }
+
   function openSelectedDocument() {
     if (!docPanel || !docSelect || !docFrame) {
       return;
@@ -651,6 +732,7 @@
       return;
     }
 
+    saveDocumentSelection(selectedPath, selectedMode);
     const modeSuffix = selectedMode ? `&mode=${encodeURIComponent(selectedMode)}` : '';
     docFrame.src = `${previewUrl}?path=${encodeURIComponent(selectedPath)}${modeSuffix}`;
     setDocStatus('Loading document...');
@@ -665,6 +747,7 @@
     docOpenBtn.addEventListener('click', openSelectedDocument);
   }
   if (docSelect) {
+    restoreDocumentSelection();
     docSelect.addEventListener('change', openSelectedDocument);
     openSelectedDocument();
   }

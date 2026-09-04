@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.5.0 (2026-09-04)
+
+### Added
+- Release-ready version bump for the current stable submission and marking workflow
+- Clearer version tracking in the public form metadata for release confirmation
+- Documentation update to reflect the current shipped configuration and release notes
+
+### Changed
+- Standardised the app version metadata to the latest release value in configuration and docs
+- Refined the release documentation to better match the current admin/marking workflow
+
+### Fixed
+- No functional code changes in this release; this is a release packaging and documentation update for the current stable build
+
 ## v1.4.0 (2026-09-02)
 
 ### Added

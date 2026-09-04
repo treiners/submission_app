@@ -7,6 +7,39 @@ from src import metadata
 
 
 class MetadataExtractionTests(unittest.TestCase):
+    def test_extract_submission_marker_blocks_valid(self):
+        paragraphs = [
+            "Task 1: Video Training(20M)",
+            "[Q1: ]",
+            "https://example.com/video",
+            "[Q1 END]",
+            "[Q2: ]",
+            "Answer line 1",
+            "Answer line 2",
+            "[Q2 END]",
+        ]
+
+        blocks = metadata._extract_submission_marker_blocks(paragraphs)
+
+        self.assertEqual(
+            {
+                "Q1": ["https://example.com/video"],
+                "Q2": ["Answer line 1", "Answer line 2"],
+            },
+            blocks,
+        )
+
+    def test_extract_submission_marker_blocks_malformed_returns_empty(self):
+        paragraphs = [
+            "[Q1: ]",
+            "answer line",
+            "[Q2 END]",
+        ]
+
+        blocks = metadata._extract_submission_marker_blocks(paragraphs)
+
+        self.assertEqual({}, blocks)
+
     def test_strip_submission_markers_removes_tag_lines(self):
         paragraphs = [
             "[Q2:  ]",
@@ -165,6 +198,49 @@ class MetadataExtractionTests(unittest.TestCase):
         self.assertIn("I expect to learn optimization", answers_by_template["Q1"]["answer"])
         self.assertNotIn("Model is a simplified representation", answers_by_template["Q1"]["answer"])
         self.assertIn("Model is a simplified representation", answers_by_template["Q2"]["answer"])
+
+    def test_marker_blocks_override_prompt_diff_assignment(self):
+        q1_prompt = "How did you record the video?"
+        q2_prompt = "How do you (personally) learn and practice AMPL?"
+
+        template_lines = [q1_prompt, q2_prompt]
+        submission_lines = [
+            q1_prompt,
+            "Long reflection paragraph that appears before the marker block and should not be captured for Q1 when markers are present.",
+            "[Q1: ]",
+            "https://example.com/video",
+            "[Q1 END]",
+            "[Q2: ]",
+            "Q2 answer paragraph.",
+            "[Q2 END]",
+        ]
+
+        with patch("src.metadata._docx_paragraphs", side_effect=[template_lines, submission_lines]):
+            extraction = metadata.extract_answers_with_template("submission.docx", "template.docx")
+
+        answers = {item["template_question_id"]: item for item in extraction["answers"]}
+        self.assertEqual("https://example.com/video", answers["Q1"]["answer"])
+        self.assertEqual(["https://example.com/video"], answers["Q1"]["answer_paragraphs"])
+        self.assertEqual("Q2 answer paragraph.", answers["Q2"]["answer"])
+
+    def test_malformed_markers_fall_back_to_prompt_diff(self):
+        q1_prompt = "How did you record the video?"
+        q2_prompt = "How do you (personally) learn and practice AMPL?"
+
+        template_lines = [q1_prompt, q2_prompt]
+        submission_lines = [
+            q1_prompt + " https://example.com/video",
+            "[Q1: ]",
+            "This marker block is malformed because it never closes",
+            q2_prompt + " I practice by solving examples.",
+        ]
+
+        with patch("src.metadata._docx_paragraphs", side_effect=[template_lines, submission_lines]):
+            extraction = metadata.extract_answers_with_template("submission.docx", "template.docx")
+
+        answers = {item["template_question_id"]: item for item in extraction["answers"]}
+        self.assertIn("https example com video", answers["Q1"]["answer"])
+        self.assertIn("i practice by solving examples", answers["Q2"]["answer"])
 
     def test_cross_prompt_drift_is_flagged_in_confidence(self):
         answers = [
