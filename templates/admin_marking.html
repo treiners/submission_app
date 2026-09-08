@@ -450,19 +450,45 @@
 
     <aside class="marking-doc-column">
       <div class="card marking-doc-panel" data-doc-preview-url="{{ url_for('admin_marking_document_preview', submission_id=marking_text_submission_id) }}">
-        <h2>Original document</h2>
-        {% if marking_document_options %}
-        <div class="marking-doc-controls">
-          <select id="marking-doc-select" aria-label="Select submission document for preview">
-            {% for document in marking_document_options %}
-            <option value="{{ document.path }}" data-mode="{{ document.mode }}" {% if document.selected %}selected{% endif %}>{{ document.label }}</option>
-            {% endfor %}
-          </select>
-          <button type="button" id="marking-doc-open-btn" class="marking-ai-btn secondary">Open</button>
+        <div class="marking-doc-header">
+          <h2>Original document</h2>
+          {% if marking_document_options %}
+          <button type="button" id="marking-doc-layout-toggle" class="marking-doc-layout-toggle" aria-pressed="false" data-layout="single">Split view</button>
+          {% endif %}
         </div>
-        <span id="marking-doc-status" class="inline-file-status" aria-live="polite"></span>
-        <div class="marking-doc-frame-wrap">
-          <iframe id="marking-doc-frame" title="Original submission preview"></iframe>
+        {% if marking_document_options %}
+        <div class="marking-doc-layout" data-layout="single">
+          <div class="marking-doc-pane marking-doc-pane-primary" data-pane="primary">
+            <div class="marking-doc-controls">
+              <select class="marking-doc-select" id="marking-doc-select-primary" aria-label="Select top document preview">
+                {% for document in marking_document_options %}
+                <option value="{{ document.path }}" data-mode="{{ document.mode }}" {% if document.selected %}selected{% endif %}>{{ document.label }}</option>
+                {% endfor %}
+              </select>
+              <button type="button" class="marking-doc-open-btn marking-ai-btn secondary" data-pane="primary">Open</button>
+            </div>
+            <span class="marking-doc-status" data-pane="primary" aria-live="polite"></span>
+            <div class="marking-doc-frame-wrap">
+              <iframe class="marking-doc-frame" data-pane="primary" title="Top submission preview"></iframe>
+            </div>
+          </div>
+
+          <div class="marking-doc-split-divider" id="marking-doc-split-divider" role="separator" aria-orientation="horizontal" aria-label="Resize top and bottom panes" tabindex="0"></div>
+
+          <div class="marking-doc-pane marking-doc-pane-secondary" data-pane="secondary" hidden>
+            <div class="marking-doc-controls">
+              <select class="marking-doc-select" id="marking-doc-select-secondary" aria-label="Select bottom document preview">
+                {% for document in marking_document_options %}
+                <option value="{{ document.path }}" data-mode="{{ document.mode }}" {% if document.selected %}selected{% endif %}>{{ document.label }}</option>
+                {% endfor %}
+              </select>
+              <button type="button" class="marking-doc-open-btn marking-ai-btn secondary" data-pane="secondary">Open</button>
+            </div>
+            <span class="marking-doc-status" data-pane="secondary" aria-live="polite"></span>
+            <div class="marking-doc-frame-wrap">
+              <iframe class="marking-doc-frame" data-pane="secondary" title="Bottom submission preview"></iframe>
+            </div>
+          </div>
         </div>
         <p class="hint" style="margin-top:10px;">
           PDF is shown by default. Choose AMPL ALL FILES for an output/mod/data/run overview, or pick individual AMPL files, DOCX view, and Video playback when needed.
@@ -496,17 +522,35 @@
   const launchers = document.querySelectorAll('.inline-image-link');
   const textFileOpeners = document.querySelectorAll('.inline-file-open-btn');
   const docPanel = document.querySelector('.marking-doc-panel[data-doc-preview-url]');
-  const docSelect = document.getElementById('marking-doc-select');
-  const docOpenBtn = document.getElementById('marking-doc-open-btn');
-  const docStatus = document.getElementById('marking-doc-status');
-  const docFrame = document.getElementById('marking-doc-frame');
+  const layoutToggle = document.getElementById('marking-doc-layout-toggle');
+  const layoutContainer = document.querySelector('.marking-doc-layout');
+  const docSplitDivider = document.getElementById('marking-doc-split-divider');
+  const panes = {
+    primary: {
+      select: document.getElementById('marking-doc-select-primary'),
+      openBtn: document.querySelector('.marking-doc-open-btn[data-pane="primary"]'),
+      frame: document.querySelector('.marking-doc-frame[data-pane="primary"]'),
+      status: document.querySelector('.marking-doc-status[data-pane="primary"]'),
+      pane: document.querySelector('.marking-doc-pane-primary'),
+    },
+    secondary: {
+      select: document.getElementById('marking-doc-select-secondary'),
+      openBtn: document.querySelector('.marking-doc-open-btn[data-pane="secondary"]'),
+      frame: document.querySelector('.marking-doc-frame[data-pane="secondary"]'),
+      status: document.querySelector('.marking-doc-status[data-pane="secondary"]'),
+      pane: document.querySelector('.marking-doc-pane-secondary'),
+    },
+  };
   const markingWorkspace = document.querySelector('.marking-workspace');
   const markingDivider = document.getElementById('marking-divider');
   const markingResizeStorageKey = 'markingWorkspaceSplitPct';
   const markingDocSelectionStorageKey = 'markingDocSelection';
+  const markingDocLayoutStorageKey = 'markingDocLayout';
+  const markingDocSplitStorageKey = 'markingDocSplitPct';
   const minLeftPct = 22;
   const maxLeftPct = 55;
   let markingSplitPct = 34;
+  let markingDocSplitPct = 50;
 
   function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
@@ -661,28 +705,18 @@
     });
   });
 
-  function setDocStatus(message) {
-    if (docStatus) {
-      docStatus.textContent = message || '';
+  function getPaneSelectionKey(paneName) {
+    return (paneName === 'secondary') ? 'secondary' : 'primary';
+  }
+
+  function setDocStatus(paneName, message) {
+    const status = panes[paneName] && panes[paneName].status;
+    if (status) {
+      status.textContent = message || '';
     }
   }
 
-  function saveDocumentSelection(path, mode) {
-    try {
-      localStorage.setItem(markingDocSelectionStorageKey, JSON.stringify({
-        path: (path || '').trim(),
-        mode: (mode || '').trim(),
-      }));
-    } catch (_) {
-      // Ignore localStorage failures.
-    }
-  }
-
-  function restoreDocumentSelection() {
-    if (!docSelect) {
-      return;
-    }
-
+  function getStoredDocumentSelections() {
     let saved = null;
     try {
       const raw = localStorage.getItem(markingDocSelectionStorageKey);
@@ -691,66 +725,253 @@
       saved = null;
     }
 
+    const normalized = {
+      layout: 'single',
+      primary: { path: '', mode: '' },
+      secondary: { path: '', mode: '' },
+    };
+
     if (!saved || typeof saved !== 'object') {
+      return normalized;
+    }
+
+    if (typeof saved.layout === 'string' && ['single', 'split'].includes(saved.layout)) {
+      normalized.layout = saved.layout;
+    }
+    const legacyPath = typeof saved.path === 'string' ? saved.path.trim() : '';
+    const legacyMode = typeof saved.mode === 'string' ? saved.mode.trim() : '';
+    if (legacyPath || legacyMode) {
+      normalized.primary = { path: legacyPath, mode: legacyMode };
+    }
+
+    if (saved.primary && typeof saved.primary === 'object') {
+      normalized.primary = {
+        path: typeof saved.primary.path === 'string' ? saved.primary.path.trim() : '',
+        mode: typeof saved.primary.mode === 'string' ? saved.primary.mode.trim() : '',
+      };
+    }
+    if (saved.secondary && typeof saved.secondary === 'object') {
+      normalized.secondary = {
+        path: typeof saved.secondary.path === 'string' ? saved.secondary.path.trim() : '',
+        mode: typeof saved.secondary.mode === 'string' ? saved.secondary.mode.trim() : '',
+      };
+    }
+
+    return normalized;
+  }
+
+  function getStoredDocumentSplitRatio() {
+    const stored = localStorage.getItem(markingDocSplitStorageKey);
+    if (stored !== null && stored !== '') {
+      const parsed = Number(stored);
+      if (Number.isFinite(parsed)) {
+        return clamp(parsed, 25, 75);
+      }
+    }
+    return markingDocSplitPct;
+  }
+
+  function applyDocumentSplitRatio(pct) {
+    if (!layoutContainer || layoutContainer.dataset.layout !== 'split') {
+      return;
+    }
+    markingDocSplitPct = clamp(pct, 25, 75);
+    layoutContainer.style.gridTemplateRows = `${markingDocSplitPct}% 12px ${100 - markingDocSplitPct}%`;
+    localStorage.setItem(markingDocSplitStorageKey, String(markingDocSplitPct));
+  }
+
+  function beginDocumentSplitDrag(event) {
+    if (!layoutContainer || layoutContainer.dataset.layout !== 'split') {
       return;
     }
 
-    const savedPath = typeof saved.path === 'string' ? saved.path.trim() : '';
-    const savedMode = typeof saved.mode === 'string' ? saved.mode.trim() : '';
-    if (!savedPath && !savedMode) {
-      return;
+    event.preventDefault();
+    if (docSplitDivider) {
+      docSplitDivider.classList.add('is-dragging');
     }
 
-    const options = Array.from(docSelect.options || []);
-    const exact = options.find((opt) => {
-      const mode = ((opt.dataset && opt.dataset.mode) || '').trim();
-      return (opt.value || '').trim() === savedPath && mode === savedMode;
+    const rect = layoutContainer.getBoundingClientRect();
+    function updateFromClientY(clientY) {
+      const relative = ((clientY - rect.top) / rect.height) * 100;
+      applyDocumentSplitRatio(relative);
+    }
+
+    function onPointerMove(moveEvent) {
+      updateFromClientY(moveEvent.clientY);
+    }
+
+    function stopDragging() {
+      if (docSplitDivider) {
+        docSplitDivider.classList.remove('is-dragging');
+      }
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', stopDragging);
+      window.removeEventListener('pointercancel', stopDragging);
+    }
+
+    updateFromClientY(event.clientY);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', stopDragging, { once: true });
+    window.addEventListener('pointercancel', stopDragging, { once: true });
+  }
+
+  function saveDocumentSelection(paneName, path, mode) {
+    const stored = getStoredDocumentSelections();
+    stored[getPaneSelectionKey(paneName)] = {
+      path: (path || '').trim(),
+      mode: (mode || '').trim(),
+    };
+
+    try {
+      localStorage.setItem(markingDocSelectionStorageKey, JSON.stringify({
+        layout: stored.layout,
+        primary: stored.primary,
+        secondary: stored.secondary,
+      }));
+    } catch (_) {
+      // Ignore localStorage failures.
+    }
+  }
+
+  function restoreDocumentSelection() {
+    const saved = getStoredDocumentSelections();
+
+    if (layoutToggle && layoutContainer) {
+      const preferredLayout = ['single', 'split'].includes(saved.layout) ? saved.layout : 'single';
+      applyDocumentLayout(preferredLayout);
+      localStorage.setItem(markingDocLayoutStorageKey, preferredLayout);
+    }
+
+    Object.keys(panes).forEach((paneName) => {
+      const paneConfig = panes[paneName];
+      const select = paneConfig.select;
+      if (!select) {
+        return;
+      }
+      const savedSelection = saved[paneName] || { path: '', mode: '' };
+      const options = Array.from(select.options || []);
+      const exact = options.find((opt) => {
+        const mode = ((opt.dataset && opt.dataset.mode) || '').trim();
+        return (opt.value || '').trim() === savedSelection.path && mode === savedSelection.mode;
+      });
+
+      if (exact) {
+        select.value = exact.value;
+        return;
+      }
+
+      if (savedSelection.mode) {
+        const modeMatch = options.find((opt) => (((opt.dataset && opt.dataset.mode) || '').trim() === savedSelection.mode));
+        if (modeMatch) {
+          select.value = modeMatch.value;
+        }
+      }
     });
+  }
 
-    if (exact) {
-      docSelect.value = exact.value;
+  function applyDocumentLayout(mode) {
+    if (!layoutToggle || !layoutContainer) {
       return;
     }
+    const nextMode = (mode === 'split') ? 'split' : 'single';
+    layoutToggle.dataset.layout = nextMode;
+    layoutToggle.textContent = nextMode === 'split' ? 'Single view' : 'Split view';
+    layoutToggle.setAttribute('aria-pressed', String(nextMode === 'split'));
+    layoutContainer.dataset.layout = nextMode;
+    const secondaryPane = panes.secondary && panes.secondary.pane;
+    if (secondaryPane) {
+      secondaryPane.hidden = nextMode !== 'split';
+    }
+    if (nextMode === 'split') {
+      applyDocumentSplitRatio(getStoredDocumentSplitRatio());
+    } else {
+      layoutContainer.style.gridTemplateRows = '';
+    }
+    try {
+      localStorage.setItem(markingDocLayoutStorageKey, nextMode);
+    } catch (_) {
+      // Ignore localStorage failures.
+    }
 
-    if (savedMode) {
-      const modeMatch = options.find((opt) => (((opt.dataset && opt.dataset.mode) || '').trim() === savedMode));
-      if (modeMatch) {
-        docSelect.value = modeMatch.value;
+    const stored = getStoredDocumentSelections();
+    stored.layout = nextMode;
+    try {
+      localStorage.setItem(markingDocSelectionStorageKey, JSON.stringify({
+        layout: nextMode,
+        primary: stored.primary,
+        secondary: stored.secondary,
+      }));
+    } catch (_) {
+      // Ignore localStorage failures.
+    }
+    if (nextMode === 'single') {
+      const primarySelect = panes.primary && panes.primary.select;
+      if (primarySelect) {
+        primarySelect.setAttribute('aria-label', 'Select document preview');
       }
     }
   }
 
-  function openSelectedDocument() {
-    if (!docPanel || !docSelect || !docFrame) {
-      return;
-    }
-    const previewUrl = docPanel.getAttribute('data-doc-preview-url') || '';
-    const selectedPath = (docSelect.value || '').trim();
-    const selectedMode = ((docSelect.selectedOptions && docSelect.selectedOptions[0] && docSelect.selectedOptions[0].dataset.mode) || '').trim();
-    if (!previewUrl || !selectedPath) {
-      setDocStatus('Select a file to open.');
+  function openSelectedDocument(paneName) {
+    const paneConfig = panes[paneName];
+    if (!docPanel || !paneConfig || !paneConfig.select || !paneConfig.frame) {
       return;
     }
 
-    saveDocumentSelection(selectedPath, selectedMode);
+    const previewUrl = docPanel.getAttribute('data-doc-preview-url') || '';
+    const selectedPath = (paneConfig.select.value || '').trim();
+    const selectedMode = ((paneConfig.select.selectedOptions && paneConfig.select.selectedOptions[0] && paneConfig.select.selectedOptions[0].dataset.mode) || '').trim();
+    if (!previewUrl || !selectedPath) {
+      setDocStatus(paneName, 'Select a file to open.');
+      return;
+    }
+
+    saveDocumentSelection(paneName, selectedPath, selectedMode);
     const modeSuffix = selectedMode ? `&mode=${encodeURIComponent(selectedMode)}` : '';
-    docFrame.src = `${previewUrl}?path=${encodeURIComponent(selectedPath)}${modeSuffix}`;
-    setDocStatus('Loading document...');
+    paneConfig.frame.src = `${previewUrl}?path=${encodeURIComponent(selectedPath)}${modeSuffix}`;
+    setDocStatus(paneName, 'Loading document...');
   }
 
-  if (docFrame) {
-    docFrame.addEventListener('load', () => {
-      setDocStatus('');
+  Object.keys(panes).forEach((paneName) => {
+    const paneConfig = panes[paneName];
+    if (paneConfig && paneConfig.frame) {
+      paneConfig.frame.addEventListener('load', () => {
+        setDocStatus(paneName, '');
+      });
+    }
+    if (paneConfig && paneConfig.openBtn) {
+      paneConfig.openBtn.addEventListener('click', () => openSelectedDocument(paneName));
+    }
+    if (paneConfig && paneConfig.select) {
+      paneConfig.select.addEventListener('change', () => openSelectedDocument(paneName));
+    }
+  });
+
+  if (layoutToggle) {
+    layoutToggle.addEventListener('click', () => {
+      const nextMode = (layoutToggle.dataset.layout === 'split') ? 'single' : 'split';
+      applyDocumentLayout(nextMode);
     });
   }
-  if (docOpenBtn) {
-    docOpenBtn.addEventListener('click', openSelectedDocument);
+
+  if (docSplitDivider) {
+    docSplitDivider.addEventListener('pointerdown', beginDocumentSplitDrag);
+    docSplitDivider.addEventListener('keydown', (event) => {
+      const key = (event.key || '').toLowerCase();
+      if (key === 'arrowup') {
+        event.preventDefault();
+        applyDocumentSplitRatio(markingDocSplitPct - 5);
+      } else if (key === 'arrowdown') {
+        event.preventDefault();
+        applyDocumentSplitRatio(markingDocSplitPct + 5);
+      }
+    });
   }
-  if (docSelect) {
-    restoreDocumentSelection();
-    docSelect.addEventListener('change', openSelectedDocument);
-    openSelectedDocument();
-  }
+
+  restoreDocumentSelection();
+  Object.keys(panes).forEach((paneName) => {
+    openSelectedDocument(paneName);
+  });
 
   function isTypingTarget(target) {
     if (!target) {

@@ -53,7 +53,7 @@ Edit `config.json` — no code changes needed:
 ```json
 {
   "assignment_title": "Assignment 1 Submission",
-  "form_version": "1.5.0",
+  "form_version": "1.5.1",
   "marking_template_docx": "marking_template/marking_template_MATH5007_A1P1_2026_S2.docx",
   "marking_extraction_areas": ["report"],
   "marking_preview_max_images": 12,

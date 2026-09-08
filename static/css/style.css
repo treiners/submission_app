@@ -786,9 +786,117 @@ button.action-btn:disabled {
   flex-direction: column;
 }
 
+.marking-doc-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
 .marking-doc-panel h2 {
   font-size: 0.94rem;
-  margin: 0 0 10px;
+  margin: 0;
+}
+
+.marking-doc-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  flex: 1;
+  height: 100%;
+}
+
+.marking-doc-layout[data-layout="split"] {
+  display: grid;
+  grid-template-rows: 50% 12px 50%;
+  height: 100%;
+  min-height: 0;
+}
+
+.marking-doc-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.6);
+  padding: 10px;
+  height: 100%;
+}
+
+.marking-doc-pane-primary,
+.marking-doc-pane-secondary {
+  min-height: 0;
+}
+
+.marking-doc-layout[data-layout="single"] .marking-doc-pane-secondary {
+  display: none;
+}
+
+.marking-doc-layout[data-layout="split"] .marking-doc-pane-primary,
+.marking-doc-layout[data-layout="split"] .marking-doc-pane-secondary {
+  display: flex;
+}
+
+.marking-doc-split-divider {
+  position: relative;
+  width: 100%;
+  height: 12px;
+  cursor: row-resize;
+  border-radius: 999px;
+  background: transparent;
+  margin: 0;
+  touch-action: none;
+}
+
+.marking-doc-split-divider::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 56px;
+  height: 2px;
+  transform: translate(-50%, -50%);
+  background: rgba(82, 96, 109, 0.32);
+  border-radius: 999px;
+}
+
+.marking-doc-split-divider::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.marking-doc-split-divider:hover::before,
+.marking-doc-split-divider.is-dragging::before {
+  background: var(--accent);
+}
+
+.marking-doc-split-divider:hover::after,
+.marking-doc-split-divider.is-dragging::after {
+  border-color: var(--accent);
+}
+
+.marking-doc-header .marking-doc-layout-toggle {
+  appearance: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--accent);
+  padding: 6px 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .marking-doc-controls {
@@ -798,7 +906,7 @@ button.action-btn:disabled {
   margin-bottom: 6px;
 }
 
-#marking-doc-select {
+.marking-doc-select {
   flex: 1;
   min-width: 0;
   border: 1px solid var(--line);
@@ -807,6 +915,14 @@ button.action-btn:disabled {
   color: var(--ink);
   padding: 7px 8px;
   font-size: 0.78rem;
+}
+
+.marking-doc-status {
+  display: block;
+  min-height: 1.1em;
+  font-size: 0.74rem;
+  color: var(--ink-soft);
+  margin-bottom: 6px;
 }
 
 .marking-doc-frame-wrap {
@@ -819,7 +935,7 @@ button.action-btn:disabled {
   background: #fff;
 }
 
-#marking-doc-frame {
+.marking-doc-frame {
   display: block;
   width: 100%;
   height: 100%;

@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.5.1 (2026-09-08)
+
+### Added
+- Split-view toggle in the right-hand marking pane so a second document/video preview can be stacked vertically
+- Draggable split divider in the stacked preview layout with saved local-state sizing
+- Cleaner embedded video preview that removes the filename/header clutter above the player
+
+### Changed
+- The right-pane preview layout now fills the available height in both single and split modes
+- Video preview presentation is more compact and suitable for side-by-side marking comparison
+
+### Fixed
+- Fixed the stacked preview panel height and drag behaviour so both panes use the available space cleanly
+
 ## v1.5.0 (2026-09-04)
 
 ### Added
@@ -10,6 +24,7 @@
 ### Changed
 - Standardised the app version metadata to the latest release value in configuration and docs
 - Refined the release documentation to better match the current admin/marking workflow
+- Automatic video conversation from mov to mpeg/avi on submission and visualisation
 
 ### Fixed
 - No functional code changes in this release; this is a release packaging and documentation update for the current stable build
