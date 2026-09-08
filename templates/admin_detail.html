@@ -68,6 +68,24 @@
       </div>
     {% endfor %}
   </div>
+
+  <div class="card" style="margin-top:18px;">
+    <h2 style="margin-top:0;">Upload files for this student</h2>
+    <p class="subtitle" style="margin-top:0; margin-bottom:14px;">This uses the same configured submission areas and validation rules as the student form.</p>
+    <form method="POST" action="{{ url_for('admin_upload_submission_files', submission_id=submission.id) }}" enctype="multipart/form-data">
+      {% for area in submission_areas %}
+      <div style="margin-bottom:16px; padding:12px; border:1px solid var(--line); border-radius:10px; background:var(--panel-alt);">
+        <label for="{{ area.key }}" style="display:block; font-weight:600; margin-bottom:6px;">{{ area.label }}</label>
+        {% if area.instruction %}<p class="subtitle" style="margin:0 0 8px;">{{ area.instruction }}</p>{% endif %}
+        <div style="font-size:0.8rem; color:var(--ink-soft); margin-bottom:8px;">
+          Allowed: {{ area.allowed_extensions | join(', ') }} &middot; Max {{ area.max_size_mb }} MB per file &middot; Up to {{ area.max_files }} file(s)
+        </div>
+        <input type="file" id="{{ area.key }}" name="{{ area.key }}" accept="{{ area.allowed_extensions | join(',') }}" {% if area.max_files > 1 %}multiple{% endif %}>
+      </div>
+      {% endfor %}
+      <button type="submit" class="primary" style="width:auto;">Upload selected files</button>
+    </form>
+  </div>
 </div>
 </body>
 </html>

@@ -1,3 +1,4 @@
+import importlib
 import unittest
 import tempfile
 from pathlib import Path
@@ -200,6 +201,50 @@ class MetadataExtractionTests(unittest.TestCase):
         self.assertIn("Model is a simplified representation", answers_by_template["Q2"]["answer"])
 
     def test_marker_blocks_override_prompt_diff_assignment(self):
+        q1_prompt = "How did you record the video?"
+        q2_prompt = "How do you (personally) learn and practice AMPL?"
+
+        template_lines = [q1_prompt, q2_prompt]
+        submission_lines = [
+            q1_prompt,
+            "Long reflection paragraph that appears before the marker block and should not be captured for Q1 when markers are present.",
+            "[Q1: ]",
+            "https://example.com/video",
+            "[Q1 END]",
+            "[Q2: ]",
+            "Q2 answer paragraph.",
+            "[Q2 END]",
+        ]
+
+        with patch("src.metadata._docx_paragraphs", side_effect=[template_lines, submission_lines]):
+            extraction = metadata.extract_answers_with_template("submission.docx", "template.docx")
+
+    def test_resolve_submission_upload_root_uses_existing_submission_folder(self):
+        submission = {
+            "files": [{"storage_location": "/tmp/uploads/student_abc_DEF123/report/report.pdf"}],
+            "student_id": "student123",
+            "name": "Ada Lovelace",
+            "code": "DEF123",
+        }
+
+        root = importlib.import_module("app")._resolve_submission_upload_root(submission)
+
+        self.assertEqual(Path("/private/tmp/uploads/student_abc_DEF123"), root)
+
+    def test_resolve_submission_upload_root_falls_back_to_student_code(self):
+        submission = {
+            "files": [],
+            "student_id": "student123",
+            "name": "Ada Lovelace",
+            "code": "DEF123",
+        }
+
+        root = importlib.import_module("app")._resolve_submission_upload_root(submission)
+
+        expected = (Path(importlib.import_module("app").PROJECT_ROOT) / "uploads" / "student123_Ada_Lovelace_DEF123").resolve()
+        self.assertEqual(expected, root)
+
+    def test_marker_blocks_override_prompt_diff_assignment_followup(self):
         q1_prompt = "How did you record the video?"
         q2_prompt = "How do you (personally) learn and practice AMPL?"
 

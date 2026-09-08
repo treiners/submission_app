@@ -330,6 +330,42 @@ def _submission_root_folder(submission_record):
     return local_files[0].parents[1]
 
 
+def _submission_folder_name(submission_record):
+    name = str(submission_record.get("name") or "").strip()
+    student_id = str(submission_record.get("student_id") or "").strip()
+    code = str(submission_record.get("code") or "").strip()
+    if not student_id:
+        student_id = "unknown_student"
+    if not code:
+        code = "unknown_code"
+    folder_name = f"{student_id}_{secure_filename(name) or 'student'}_{code}"
+    return folder_name.strip("_") or "submission"
+
+
+def _resolve_submission_upload_root(submission_record):
+    base_upload_root = Path(STORAGE_ENV["LOCAL_UPLOAD_ROOT"]).resolve()
+    for file_record in submission_record.get("files", []):
+        storage_location = str(file_record.get("storage_location") or "").strip()
+        if not storage_location:
+            continue
+
+        candidate = Path(storage_location)
+        if not candidate.is_absolute():
+            candidate = (PROJECT_ROOT / candidate).resolve()
+        else:
+            candidate = candidate.resolve()
+
+        try:
+            resolved_parent = candidate.parents[1]
+        except IndexError:
+            resolved_parent = candidate.parent
+
+        if resolved_parent.exists() or candidate.name:
+            return resolved_parent
+
+    return base_upload_root / _submission_folder_name(submission_record)
+
+
 def _area_applies_to_question(area_key, question_id):
     scope = AREA_QUESTION_MAP.get(area_key)
     if not scope:
@@ -2032,7 +2068,136 @@ def admin_submission_detail(submission_id):
         "admin_detail.html",
         submission=submission,
         form_version=SUBMISSION_CONFIG.get("form_version"),
+        submission_areas=SUBMISSION_CONFIG.get("areas", []),
     )
+
+
+@app.route("/admin/submission/<int:submission_id>/upload", methods=["POST"])
+@login_required
+def admin_upload_submission_files(submission_id):
+    submission = db.get_submission(submission_id)
+    if not submission:
+        abort(404)
+
+    errors = []
+    upload_root = _resolve_submission_upload_root(submission)
+    upload_root.mkdir(parents=True, exist_ok=True)
+    base_upload_root = Path(STORAGE_ENV["LOCAL_UPLOAD_ROOT"]).resolve()
+    try:
+        relative_submission_root = upload_root.relative_to(base_upload_root)
+    except ValueError:
+        relative_submission_root = Path(upload_root.name)
+
+    primary_backend, fallback_backend = storage.get_storage_backend(STORAGE_ENV)
+    saved_count = 0
+    extraction_areas = set(SUBMISSION_CONFIG.get("marking_extraction_areas", ["report"]))
+
+    for area in SUBMISSION_CONFIG.get("areas", []):
+        area_key = area["key"]
+        uploaded = [f for f in request.files.getlist(area_key) if f and f.filename]
+        if not uploaded:
+            continue
+        if len(uploaded) > area["max_files"]:
+            errors.append(f"Only {area['max_files']} file(s) allowed for '{area['label']}'.")
+            continue
+
+        for file_obj in uploaded:
+            err = validate_file(area, file_obj)
+            if err:
+                errors.append(err)
+                continue
+
+            safe_name = secure_filename(file_obj.filename)
+            area_folder = str(relative_submission_root / area_key)
+            with tempfile.TemporaryDirectory() as tmpdir:
+                tmp_path = Path(tmpdir) / safe_name
+                file_obj.save(tmp_path)
+                try:
+                    result = primary_backend.upload_file(tmp_path, area_folder, safe_name)
+                except storage.StorageError:
+                    result = fallback_backend.upload_file(tmp_path, area_folder, safe_name)
+
+                file_metadata = metadata.extract_file_metadata(tmp_path, file_obj.filename, area_key)
+                area_scope = AREA_QUESTION_MAP.get(area_key)
+                file_metadata["question_scope"] = sorted(area_scope) if area_scope else "all"
+                metadata_path = upload_root / "metadata" / f"{area_key}_{safe_name}.json"
+                metadata.write_metadata(metadata_path, file_metadata)
+
+                if area_key in extraction_areas and tmp_path.suffix.lower() == ".docx":
+                    try:
+                        marking_preview = metadata.extract_marking_preview(
+                            submission_docx=tmp_path,
+                            submission_config=SUBMISSION_CONFIG,
+                            project_root=PROJECT_ROOT,
+                        )
+                        preview_path = upload_root / "metadata" / f"{area_key}_{safe_name}.answers.json"
+                        metadata.write_metadata(preview_path, marking_preview)
+                    except (OSError, metadata.zipfile.BadZipFile, metadata.ElementTree.ParseError) as error:
+                        app.logger.warning(
+                            "Admin upload preview extraction failed for submission %s (%s): %s",
+                            submission_id,
+                            safe_name,
+                            error,
+                        )
+
+                db.add_submission_file(
+                    submission_id=submission_id,
+                    area_key=area_key,
+                    area_label=area["label"],
+                    original_filename=file_obj.filename,
+                    stored_filename=safe_name,
+                    storage_location=result["location"],
+                    size_bytes=tmp_path.stat().st_size,
+                )
+                saved_count += 1
+
+                if area_key == "ampl_code" and tmp_path.suffix.lower() == ".zip":
+                    extract_root = Path(tmpdir) / "ampl_extracted"
+                    try:
+                        extracted_files = metadata.extract_ampl_archive(tmp_path, extract_root)
+                    except (metadata.zipfile.BadZipFile, OSError) as error:
+                        app.logger.warning("AMPL archive extraction failed for admin upload to submission %s: %s", submission_id, error)
+                        extracted_files = []
+
+                    for extracted_path, archive_name in extracted_files:
+                        relative_path = extracted_path.relative_to(extract_root)
+                        extracted_folder = str(relative_submission_root / area_key / relative_path.parent.as_posix())
+                        extracted_name = extracted_path.name
+                        try:
+                            extracted_result = primary_backend.upload_file(
+                                extracted_path, extracted_folder, extracted_name,
+                            )
+                        except storage.StorageError:
+                            extracted_result = fallback_backend.upload_file(
+                                extracted_path, extracted_folder, extracted_name,
+                            )
+
+                        extracted_metadata = metadata.extract_file_metadata(extracted_path, archive_name, area_key)
+                        extracted_metadata["extracted_from"] = file_obj.filename
+                        extracted_metadata["question_scope"] = sorted(area_scope) if area_scope else "all"
+                        extracted_metadata_path = upload_root / "metadata" / f"{area_key}_{relative_path.as_posix().replace('/', '_')}.json"
+                        metadata.write_metadata(extracted_metadata_path, extracted_metadata)
+                        db.add_submission_file(
+                            submission_id=submission_id,
+                            area_key=area_key,
+                            area_label=area["label"],
+                            original_filename=archive_name,
+                            stored_filename=extracted_name,
+                            storage_location=extracted_result["location"],
+                            size_bytes=extracted_path.stat().st_size,
+                        )
+
+    if errors:
+        for error in errors:
+            flash(error)
+        return redirect(url_for("admin_submission_detail", submission_id=submission_id))
+
+    if saved_count:
+        db.update_submission_status(submission_id, "completed")
+        flash(f"Uploaded {saved_count} file(s) for this submission.")
+    else:
+        flash("No files were uploaded.")
+    return redirect(url_for("admin_submission_detail", submission_id=submission_id))
 
 
 @app.route("/admin/submission/<int:submission_id>/analysis", methods=["GET", "POST"])

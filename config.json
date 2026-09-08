@@ -25,7 +25,7 @@
     {
       "key": "ampl_code",
       "label": "AMPL Code",
-      "instruction": "Upload a single ZIP containing your AMPL .mod/.dat/.run files. If you have multiple models, please include them all in the ZIP. Ensure that your main model file is named 'model.mod' and your data file is named 'data.dat'.",
+      "instruction": "Upload a single ZIP containing your AMPL .mod/.dat/.run files. If you have multiple models, please include them all in the ZIP. Ensure that your run script loads the correct models (double check the filenames).",
       "questions": [2],
       "allowed_extensions": [".zip"],
       "max_size_mb": 10,
