@@ -47,29 +47,39 @@
       </div>
 
       {% for area in areas %}
-      <div class="field">
-        <label>{{ area.label }}</label>
-        {% if area.instruction %}
-        <div class="hint" style="margin-bottom:8px;">{{ area.instruction }}</div>
-        {% endif %}
-        <div class="dropzone" data-area="{{ area.key }}">
-          <div class="dz-label">Drag file here, or click to choose</div>
-          <div class="dz-hint">
-            Allowed: {{ area.allowed_extensions | join(', ') }}
-            &middot; Max {{ area.max_size_mb }}MB
-            &middot; {{ area.max_files }} file{{ 's' if area.max_files > 1 else '' }} max
-          </div>
-          <input type="file"
+      <div class="submission-area-panel" data-area-panel="{{ area.key }}">
+        <div class="field">
+          <label>{{ area.label }}</label>
+          {% if area.instruction %}
+          <div class="hint" style="margin-bottom:8px;">{{ area.instruction }}</div>
+          {% endif %}
+          {% if area.type == 'url' %}
+          <input type="url"
                  name="{{ area.key }}"
                  data-area="{{ area.key }}"
-                 accept="{{ area.allowed_extensions | join(',') }}"
-                 {% if area.max_files > 1 %}multiple{% endif %}>
+                 placeholder="https://example.com or https://youtu.be/..."
+                 style="width:100%; box-sizing:border-box;">
+          {% else %}
+          <div class="dropzone" data-area="{{ area.key }}">
+            <div class="dz-label">Drag file here, or click to choose</div>
+            <div class="dz-hint">
+              Allowed: {{ area.allowed_extensions | join(', ') }}
+              &middot; Max {{ area.max_size_mb }}MB
+              &middot; {{ area.max_files }} file{{ 's' if area.max_files > 1 else '' }} max
+            </div>
+            <input type="file"
+                   name="{{ area.key }}"
+                   data-area="{{ area.key }}"
+                   accept="{{ area.allowed_extensions | join(',') }}"
+                   {% if area.max_files > 1 %}multiple{% endif %}>
+          </div>
+          <div class="file-list" data-area-list="{{ area.key }}"></div>
+          {% endif %}
+          <label class="declare-row">
+            <input type="checkbox" class="declare-checkbox" data-declare="{{ area.key }}">
+            I declare that I did not upload this file
+          </label>
         </div>
-        <div class="file-list" data-area-list="{{ area.key }}"></div>
-        <label class="declare-row">
-          <input type="checkbox" class="declare-checkbox" data-declare="{{ area.key }}">
-          I declare that I did not upload this file
-        </label>
       </div>
       {% endfor %}
 

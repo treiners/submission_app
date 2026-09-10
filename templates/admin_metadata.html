@@ -23,8 +23,43 @@
 
   {% for entry in metadata_entries %}
   <div class="card metadata-card">
-    <h2>{{ entry.display_name }}</h2>
-    <pre>{{ entry.data | tojson(indent=2) }}</pre>
+    <div class="metadata-card-header">
+      <div>
+        <h2>{{ entry.display_name }}</h2>
+        <p class="metadata-filename">{{ entry.filename }}</p>
+      </div>
+      <span class="metadata-badge">File metadata</span>
+    </div>
+
+    {% for section in entry.sections %}
+    <section class="metadata-section">
+      <h3>{{ section.title }}</h3>
+      <dl class="metadata-grid">
+        {% for row in section.rows %}
+        <div>
+          <dt>{{ row.label }}</dt>
+          <dd>{{ row.value }}</dd>
+        </div>
+        {% endfor %}
+      </dl>
+
+      {% if section.list_items %}
+      <details class="metadata-list">
+        <summary>{{ section.list_title }} ({{ section.list_items|length }})</summary>
+        <ul>
+          {% for item in section.list_items %}
+          <li>{{ item }}</li>
+          {% endfor %}
+        </ul>
+      </details>
+      {% endif %}
+    </section>
+    {% endfor %}
+
+    <details class="metadata-raw">
+      <summary>View raw JSON</summary>
+      <pre>{{ entry.data | tojson(indent=2) }}</pre>
+    </details>
   </div>
   {% else %}
   <div class="card">No local metadata files were found for this submission.</div>

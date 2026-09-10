@@ -53,11 +53,16 @@
     <dt style="font-size:0.75rem;color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.03em;">Files</dt>
     {% for f in submission.files %}
       <div class="file-chip" style="margin-top:10px;">
-        <span>[{{ f.area_label }}] {{ f.original_filename }} &middot; {{ (f.size_bytes / 1024) | round(1) }} KB</span>
-        {% if submission.storage_backend == 'local' %}
-          <a href="{{ url_for('admin_download_file', file_id=f.id) }}" style="color:var(--accent); font-size:0.82rem; font-weight:600;">Download</a>
+        {% if f.storage_location.startswith('http://') or f.storage_location.startswith('https://') %}
+          <span>[{{ f.area_label }}] {{ f.storage_location }}</span>
+          <a href="{{ f.storage_location }}" target="_blank" rel="noopener" style="color:var(--accent); font-size:0.82rem; font-weight:600;">Open URL</a>
         {% else %}
-          <span style="font-size:0.78rem; color:var(--ink-soft);">{{ f.storage_location }}</span>
+          <span>[{{ f.area_label }}] {{ f.original_filename }} &middot; {{ (f.size_bytes / 1024) | round(1) }} KB</span>
+          {% if submission.storage_backend == 'local' %}
+            <a href="{{ url_for('admin_download_file', file_id=f.id) }}" style="color:var(--accent); font-size:0.82rem; font-weight:600;">Download</a>
+          {% else %}
+            <span style="font-size:0.78rem; color:var(--ink-soft);">{{ f.storage_location }}</span>
+          {% endif %}
         {% endif %}
       </div>
     {% endfor %}

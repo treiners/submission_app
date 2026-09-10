@@ -1,5 +1,5 @@
 {
-  "assignment_title": "MATH5007 Assignment Submission A2",
+  "assignment_title": "MATH5007 Assignment Submission A1P1",
   "form_version": "1.6.0",
   "runtime": {
     "host": "0.0.0.0",
@@ -27,10 +27,10 @@
     {
       "key": "report",
       "label": "Report",
-      "instruction": "Upload either a single PDF/DOCX report or multiple images (for example scanned pages). The images will be combined into a single PDF for marking.",
-      "allowed_extensions": [".docx", ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff"],
-      "max_size_mb": 40,
-      "max_files": 12
+      "instruction": "Upload your report as a PDF or DOCX file. This is just a single file, so please ensure it is in the correct format.",
+      "allowed_extensions": [".docx", ".pdf"],
+      "max_size_mb": 10,
+      "max_files": 1
     },
     {
       "key": "url_submission",

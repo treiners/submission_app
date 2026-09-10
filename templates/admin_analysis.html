@@ -41,14 +41,19 @@
     </form>
     {% if run.duration_seconds is not none %}<p>Runtime: {{ run.duration_seconds }} seconds</p>{% endif %}
     {% if run.error %}<div class="error-box">{{ run.error }}</div>{% endif %}
-    {% if run.statistics.diagnostics %}
-      <h3>Diagnostics</h3>
-      <pre>{{ run.statistics.diagnostics | tojson(indent=2) }}</pre>
-    {% endif %}
-    {% if run.statistics %}
-      <h3>Statistics</h3>
-      <pre>{{ run.statistics | tojson(indent=2) }}</pre>
-    {% endif %}
+    {% for section in analysis_sections_by_run.get(run.id, []) %}
+      <section class="metadata-section">
+        <h3>{{ section.title }}</h3>
+        <dl class="metadata-grid">
+          {% for row in section.rows %}
+          <div>
+            <dt>{{ row.label }}</dt>
+            <dd>{{ row.value }}</dd>
+          </div>
+          {% endfor %}
+        </dl>
+      </section>
+    {% endfor %}
     <h3>Output</h3>
     <pre>{{ run.stdout or '(no output)' }}</pre>
     {% if run.stderr %}<h3>Errors</h3><pre>{{ run.stderr }}</pre>{% endif %}

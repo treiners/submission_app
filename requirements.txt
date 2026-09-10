@@ -7,3 +7,5 @@ amplpy
 openpyxl==3.1.5
 docx2pdf==0.1.8
 dxpdf==0.5.1
+Pillow==10.4.0
+reportlab==4.2.0

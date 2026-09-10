@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+import app
 from src import metadata
 
 
@@ -160,6 +161,22 @@ class MetadataExtractionTests(unittest.TestCase):
         self.assertIn("master of commerce", answers["Q1"]["answer"].lower())
         self.assertIn("optimization methods", answers["Q2"]["answer"].lower())
         self.assertIn("simplified representation", answers["Q3"]["answer"].lower())
+
+    def test_report_upload_classifier_allows_image_batches_and_rejects_mixed_types(self):
+        files = [
+            type("UploadedFile", (), {"filename": "page1.png"})(),
+            type("UploadedFile", (), {"filename": "page2.jpg"})(),
+        ]
+        result = app._classify_report_files(files)
+        self.assertEqual("image_batch", result["mode"])
+        self.assertEqual([".png", ".jpg"], [item["extension"] for item in result["files"]])
+
+        mixed_files = [
+            type("UploadedFile", (), {"filename": "report.pdf"})(),
+            type("UploadedFile", (), {"filename": "page1.png"})(),
+        ]
+        with self.assertRaisesRegex(ValueError, "either a PDF/DOCX report or multiple images"):
+            app._classify_report_files(mixed_files)
 
     def test_fuzzy_prompt_boundary_splits_variant_heading(self):
         q2_prompt = (

@@ -179,6 +179,21 @@ label {
 
 .field { margin-bottom: 20px; }
 
+.submission-area-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px 18px 8px;
+  margin-bottom: 18px;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.submission-area-panel.area-missing {
+  background: #fff5f4;
+  border-color: #f2c8c3;
+  box-shadow: inset 0 0 0 1px rgba(191, 96, 84, 0.08);
+}
+
 input[type="text"],
 input[type="email"],
 input[type="password"] {
@@ -627,18 +642,90 @@ button.action-btn:disabled {
 .metadata-card { margin-top: 20px; }
 .metadata-card {
   margin-top: 20px;
-  border: 2px solid #111;
+  border: 1px solid var(--line);
 }
-.metadata-card h2 { font-size: 1rem; margin: 0 0 12px; }
+.metadata-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+.metadata-card h2 { font-size: 1.05rem; margin: 0; }
+.metadata-filename {
+  margin: 3px 0 0;
+  color: var(--ink-soft);
+  font: 0.78rem/1.4 var(--mono);
+  overflow-wrap: anywhere;
+}
+.metadata-badge {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.metadata-section { padding-top: 18px; }
 .metadata-card h3 {
-  font-size: 1rem;
-  margin: 22px 0 10px;
-  padding: 0 0 12px;
-  border-bottom: 2px solid #111;
+  font-size: 0.9rem;
+  margin: 0 0 10px;
+  padding: 0;
   text-transform: none;
-  color: #111;
+  color: var(--ink);
   letter-spacing: 0;
 }
+.metadata-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 18px;
+  margin: 0;
+}
+.metadata-grid > div {
+  min-width: 0;
+  padding: 9px 0;
+  border-top: 1px solid var(--line);
+}
+.metadata-grid dt {
+  color: var(--ink-soft);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.metadata-grid dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+  font-size: 0.88rem;
+}
+.metadata-list,
+.metadata-raw {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.metadata-list summary,
+.metadata-raw summary {
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.metadata-list ul {
+  max-height: 220px;
+  overflow: auto;
+  margin: 10px 0 0;
+  padding: 10px 10px 10px 28px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: 0.78rem/1.5 var(--mono);
+}
+.metadata-list li { overflow-wrap: anywhere; }
+.metadata-raw { margin-top: 22px; }
+.metadata-raw pre { margin-top: 10px; }
 .analysis-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .analysis-button { margin: 8px 0 20px; }
 .analysis-delete { margin: 0 0 8px; }
@@ -652,6 +739,12 @@ button.action-btn:disabled {
   font: 0.78rem/1.5 var(--mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .metadata-card-header { display: block; }
+  .metadata-badge { display: inline-block; margin-top: 10px; }
+  .metadata-grid { grid-template-columns: 1fr; }
 }
 
 .marking-images {
@@ -815,6 +908,11 @@ button.action-btn:disabled {
   min-height: 0;
 }
 
+.marking-doc-layout[data-layout="split"][data-orientation="columns"] {
+  grid-template-rows: 100%;
+  grid-template-columns: 50% 12px 50%;
+}
+
 .marking-doc-pane {
   display: flex;
   flex-direction: column;
@@ -849,6 +947,22 @@ button.action-btn:disabled {
   background: transparent;
   margin: 0;
   touch-action: none;
+}
+
+.marking-doc-layout[data-layout="split"][data-orientation="columns"] .marking-doc-split-divider {
+  width: 12px;
+  height: 100%;
+  cursor: col-resize;
+}
+
+.marking-doc-layout[data-layout="split"][data-orientation="columns"] .marking-doc-split-divider::before {
+  width: 2px;
+  height: 56px;
+}
+
+.marking-doc-layout[data-layout="split"][data-orientation="columns"] .marking-doc-split-divider::after {
+  width: 18px;
+  height: 18px;
 }
 
 .marking-doc-split-divider::before {
@@ -1068,6 +1182,22 @@ button.action-btn:disabled {
   #marking-doc-frame {
     height: 68vh;
     min-height: 460px;
+  }
+
+  .marking-doc-layout[data-layout="split"][data-orientation="columns"] {
+    grid-template-columns: 100%;
+    grid-template-rows: 50% 12px 50%;
+  }
+
+  .marking-doc-layout[data-layout="split"][data-orientation="columns"] .marking-doc-split-divider {
+    width: 100%;
+    height: 12px;
+    cursor: row-resize;
+  }
+
+  .marking-doc-layout[data-layout="split"][data-orientation="columns"] .marking-doc-split-divider::before {
+    width: 56px;
+    height: 2px;
   }
 }
 
