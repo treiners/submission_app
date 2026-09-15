@@ -175,7 +175,7 @@ class MetadataExtractionTests(unittest.TestCase):
             type("UploadedFile", (), {"filename": "report.pdf"})(),
             type("UploadedFile", (), {"filename": "page1.png"})(),
         ]
-        with self.assertRaisesRegex(ValueError, "either a PDF/DOCX or multiple images"):
+        with self.assertRaisesRegex(ValueError, "either a PDF/DOCX report or multiple images"):
             app._classify_report_files(mixed_files)
 
     def test_fuzzy_prompt_boundary_splits_variant_heading(self):

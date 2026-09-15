@@ -454,6 +454,7 @@
           <h2>Original document</h2>
           {% if marking_document_options %}
           <button type="button" id="marking-doc-layout-toggle" class="marking-doc-layout-toggle" aria-pressed="false" data-layout="single">Split view</button>
+          <button type="button" id="marking-doc-orientation-toggle" class="marking-doc-layout-toggle" aria-pressed="false" data-orientation="rows" hidden>Side-by-side</button>
           {% endif %}
         </div>
         {% if marking_url_links %}
@@ -534,6 +535,7 @@
   const textFileOpeners = document.querySelectorAll('.inline-file-open-btn');
   const docPanel = document.querySelector('.marking-doc-panel[data-doc-preview-url]');
   const layoutToggle = document.getElementById('marking-doc-layout-toggle');
+  const orientationToggle = document.getElementById('marking-doc-orientation-toggle');
   const layoutContainer = document.querySelector('.marking-doc-layout');
   const docSplitDivider = document.getElementById('marking-doc-split-divider');
   const panes = {
@@ -558,6 +560,7 @@
   const markingDocSelectionStorageKey = 'markingDocSelection';
   const markingDocLayoutStorageKey = 'markingDocLayout';
   const markingDocSplitStorageKey = 'markingDocSplitPct';
+  const markingDocOrientationStorageKey = 'markingDocOrientation';
   const minLeftPct = 22;
   const maxLeftPct = 55;
   let markingSplitPct = 34;
@@ -782,12 +785,25 @@
     return markingDocSplitPct;
   }
 
+  function getEffectiveDocumentOrientation() {
+    if (window.matchMedia && window.matchMedia('(max-width: 900px)').matches) {
+      return 'rows';
+    }
+    return layoutContainer.dataset.orientation === 'columns' ? 'columns' : 'rows';
+  }
+
   function applyDocumentSplitRatio(pct) {
     if (!layoutContainer || layoutContainer.dataset.layout !== 'split') {
       return;
     }
     markingDocSplitPct = clamp(pct, 25, 75);
-    layoutContainer.style.gridTemplateRows = `${markingDocSplitPct}% 12px ${100 - markingDocSplitPct}%`;
+    if (getEffectiveDocumentOrientation() === 'columns') {
+      layoutContainer.style.gridTemplateColumns = `${markingDocSplitPct}% 12px ${100 - markingDocSplitPct}%`;
+      layoutContainer.style.gridTemplateRows = '';
+    } else {
+      layoutContainer.style.gridTemplateRows = `${markingDocSplitPct}% 12px ${100 - markingDocSplitPct}%`;
+      layoutContainer.style.gridTemplateColumns = '';
+    }
     localStorage.setItem(markingDocSplitStorageKey, String(markingDocSplitPct));
   }
 
@@ -802,13 +818,15 @@
     }
 
     const rect = layoutContainer.getBoundingClientRect();
-    function updateFromClientY(clientY) {
-      const relative = ((clientY - rect.top) / rect.height) * 100;
+    function updateFromClientPosition(clientX, clientY) {
+      const relative = getEffectiveDocumentOrientation() === 'columns'
+        ? ((clientX - rect.left) / rect.width) * 100
+        : ((clientY - rect.top) / rect.height) * 100;
       applyDocumentSplitRatio(relative);
     }
 
     function onPointerMove(moveEvent) {
-      updateFromClientY(moveEvent.clientY);
+      updateFromClientPosition(moveEvent.clientX, moveEvent.clientY);
     }
 
     function stopDragging() {
@@ -820,7 +838,7 @@
       window.removeEventListener('pointercancel', stopDragging);
     }
 
-    updateFromClientY(event.clientY);
+    updateFromClientPosition(event.clientX, event.clientY);
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', stopDragging, { once: true });
     window.addEventListener('pointercancel', stopDragging, { once: true });
@@ -889,6 +907,9 @@
     layoutToggle.textContent = nextMode === 'split' ? 'Single view' : 'Split view';
     layoutToggle.setAttribute('aria-pressed', String(nextMode === 'split'));
     layoutContainer.dataset.layout = nextMode;
+    if (orientationToggle) {
+      orientationToggle.hidden = nextMode !== 'split';
+    }
     const secondaryPane = panes.secondary && panes.secondary.pane;
     if (secondaryPane) {
       secondaryPane.hidden = nextMode !== 'split';
@@ -897,6 +918,7 @@
       applyDocumentSplitRatio(getStoredDocumentSplitRatio());
     } else {
       layoutContainer.style.gridTemplateRows = '';
+      layoutContainer.style.gridTemplateColumns = '';
     }
     try {
       localStorage.setItem(markingDocLayoutStorageKey, nextMode);
@@ -920,6 +942,28 @@
       if (primarySelect) {
         primarySelect.setAttribute('aria-label', 'Select document preview');
       }
+    }
+  }
+
+  function getStoredDocumentOrientation() {
+    const stored = localStorage.getItem(markingDocOrientationStorageKey);
+    return stored === 'columns' ? 'columns' : 'rows';
+  }
+
+  function applyDocumentOrientation(orientation) {
+    if (!layoutContainer) {
+      return;
+    }
+    const nextOrientation = orientation === 'columns' ? 'columns' : 'rows';
+    layoutContainer.dataset.orientation = nextOrientation;
+    if (orientationToggle) {
+      orientationToggle.dataset.orientation = nextOrientation;
+      orientationToggle.textContent = nextOrientation === 'columns' ? 'Stacked' : 'Side-by-side';
+      orientationToggle.setAttribute('aria-pressed', String(nextOrientation === 'columns'));
+    }
+    localStorage.setItem(markingDocOrientationStorageKey, nextOrientation);
+    if (layoutContainer.dataset.layout === 'split') {
+      applyDocumentSplitRatio(markingDocSplitPct);
     }
   }
 
@@ -965,20 +1009,35 @@
     });
   }
 
+  if (orientationToggle) {
+    orientationToggle.addEventListener('click', () => {
+      const nextOrientation = orientationToggle.dataset.orientation === 'columns' ? 'rows' : 'columns';
+      applyDocumentOrientation(nextOrientation);
+    });
+  }
+
   if (docSplitDivider) {
     docSplitDivider.addEventListener('pointerdown', beginDocumentSplitDrag);
     docSplitDivider.addEventListener('keydown', (event) => {
       const key = (event.key || '').toLowerCase();
-      if (key === 'arrowup') {
+      const isColumns = getEffectiveDocumentOrientation() === 'columns';
+      if (!isColumns && key === 'arrowup') {
         event.preventDefault();
         applyDocumentSplitRatio(markingDocSplitPct - 5);
-      } else if (key === 'arrowdown') {
+      } else if (!isColumns && key === 'arrowdown') {
+        event.preventDefault();
+        applyDocumentSplitRatio(markingDocSplitPct + 5);
+      } else if (isColumns && key === 'arrowleft') {
+        event.preventDefault();
+        applyDocumentSplitRatio(markingDocSplitPct - 5);
+      } else if (isColumns && key === 'arrowright') {
         event.preventDefault();
         applyDocumentSplitRatio(markingDocSplitPct + 5);
       }
     });
   }
 
+  applyDocumentOrientation(getStoredDocumentOrientation());
   restoreDocumentSelection();
   Object.keys(panes).forEach((paneName) => {
     openSelectedDocument(paneName);

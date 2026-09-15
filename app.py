@@ -1,11 +1,10 @@
 import json
 import os
+import argparse
 import mimetypes
 import random
 import re
 import shutil
-import hashlib
-import importlib.util
 import string
 import subprocess
 import sys
@@ -14,7 +13,7 @@ import shlex
 from io import BytesIO
 from functools import wraps
 from pathlib import Path
-from urllib import error as urlerror, parse as urlparse, request as urlrequest
+from urllib import error as urlerror, request as urlrequest
 
 from dotenv import load_dotenv
 from flask import (
@@ -24,7 +23,24 @@ from flask import (
 from markupsafe import escape
 from werkzeug.utils import secure_filename
 
-from src import db, storage, email_util, metadata
+from src import (
+    db,
+    storage,
+    email_util,
+    analysis_display,
+    metadata,
+    metadata_display,
+    preview_conversion,
+    submission_paths,
+)
+from src.report_files import (
+    classify_report_files as _classify_report_files,
+    convert_report_images_to_pdf as _convert_report_images_to_pdf,
+)
+from src.submission_validation import (
+    validate_file,
+    validate_url,
+)
 
 load_dotenv()
 
@@ -33,6 +49,25 @@ app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-key-change-me")
 
 with open(Path(__file__).parent / "config.json") as f:
     SUBMISSION_CONFIG = json.load(f)
+
+
+def _runtime_value(name, env_name=None, default=None):
+    """Return an environment override, then a config value, then a fallback."""
+    env_name = env_name or name.upper()
+    if os.environ.get(env_name) is not None:
+        return os.environ[env_name]
+    return SUBMISSION_CONFIG.get("runtime", {}).get(name, default)
+
+
+def _runtime_int(name, env_name=None, default=0):
+    """Read an integer runtime setting from the environment or config."""
+    return int(_runtime_value(name, env_name, default))
+
+
+def _runtime_bool(name, env_name=None, default=False):
+    """Read a boolean runtime setting from the environment or config."""
+    value = _runtime_value(name, env_name, default)
+    return value if isinstance(value, bool) else str(value).strip().lower() not in {"0", "false", "no"}
 
 
 def _compute_max_content_length(config):
@@ -58,36 +93,42 @@ db.init_db()
 AREAS_BY_KEY = {a["key"]: a for a in SUBMISSION_CONFIG["areas"]}
 
 STORAGE_ENV = {
-    "STORAGE_BACKEND": os.environ.get("STORAGE_BACKEND", "local"),
-    "LOCAL_UPLOAD_ROOT": os.environ.get("LOCAL_UPLOAD_ROOT", "uploads"),
+    "STORAGE_BACKEND": _runtime_value("storage_backend", "STORAGE_BACKEND", "local"),
+    "LOCAL_UPLOAD_ROOT": _runtime_value("local_upload_root", "LOCAL_UPLOAD_ROOT", "uploads"),
     "DROPBOX_APP_KEY": os.environ.get("DROPBOX_APP_KEY"),
     "DROPBOX_APP_SECRET": os.environ.get("DROPBOX_APP_SECRET"),
     "DROPBOX_REFRESH_TOKEN": os.environ.get("DROPBOX_REFRESH_TOKEN"),
-    "DROPBOX_ROOT_FOLDER": os.environ.get("DROPBOX_ROOT_FOLDER", "/Submissions"),
+    "DROPBOX_ROOT_FOLDER": _runtime_value("dropbox_root_folder", "DROPBOX_ROOT_FOLDER", "/Submissions"),
     "ONEDRIVE_TENANT_ID": os.environ.get("ONEDRIVE_TENANT_ID"),
     "ONEDRIVE_CLIENT_ID": os.environ.get("ONEDRIVE_CLIENT_ID"),
     "ONEDRIVE_CLIENT_SECRET": os.environ.get("ONEDRIVE_CLIENT_SECRET"),
     "ONEDRIVE_DRIVE_ID": os.environ.get("ONEDRIVE_DRIVE_ID"),
-    "ONEDRIVE_ROOT_FOLDER": os.environ.get("ONEDRIVE_ROOT_FOLDER", "/Submissions"),
+    "ONEDRIVE_ROOT_FOLDER": _runtime_value("onedrive_root_folder", "ONEDRIVE_ROOT_FOLDER", "/Submissions"),
 }
 
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ"  # letters only, excludes I/O to reduce confusion
 CODE_PATTERN = re.compile(r"^[A-Z]{6}$")
-OLLAMA_ENDPOINT = os.environ.get("OLLAMA_ENDPOINT", "http://127.0.0.1:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
-REPORT_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff"}
+OLLAMA_ENDPOINT = _runtime_value("ollama_endpoint", "OLLAMA_ENDPOINT", "http://127.0.0.1:11434")
+OLLAMA_MODEL = _runtime_value("ollama_model", "OLLAMA_MODEL", "qwen2.5:7b")
 MARKING_TEXT_PREVIEW_EXTENSIONS = {".mod", ".run", ".dat"}
 MARKING_AMPL_PREVIEW_TEXT_EXTENSIONS = {".mod", ".run", ".dat", ".json", ".txt", ".log"}
-MARKING_TEXT_PREVIEW_MAX_BYTES = int(os.environ.get("MARKING_TEXT_PREVIEW_MAX_BYTES", str(2 * 1024 * 1024)))
+MARKING_TEXT_PREVIEW_MAX_BYTES = _runtime_int(
+    "marking_text_preview_max_bytes", "MARKING_TEXT_PREVIEW_MAX_BYTES", 2 * 1024 * 1024
+)
 MARKING_AMPL_OVERVIEW_SENTINEL = "__ampl_all_files__"
 MARKING_DOCUMENT_PREVIEW_EXTENSIONS = {".pdf", ".docx"}
 MARKING_VIDEO_PREVIEW_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".wmv"}
-MARKING_DOCX_PREVIEW_MAX_PARAGRAPHS = int(os.environ.get("MARKING_DOCX_PREVIEW_MAX_PARAGRAPHS", "900"))
+MARKING_DOCX_PREVIEW_MAX_PARAGRAPHS = _runtime_int(
+    "marking_docx_preview_max_paragraphs", "MARKING_DOCX_PREVIEW_MAX_PARAGRAPHS", 900
+)
 MARKING_DOCX_PDF_PREVIEW_DIR = "marking_pdf_previews"
 MARKING_VIDEO_PREVIEW_DIR = "marking_video_previews"
-MARKING_VIDEO_TRANSCODE_ENABLED = os.environ.get("MARKING_VIDEO_TRANSCODE_ENABLED", "1").strip().lower() not in {"0", "false", "no"}
+MARKING_VIDEO_TRANSCODE_ENABLED = _runtime_bool(
+    "marking_video_transcode_enabled", "MARKING_VIDEO_TRANSCODE_ENABLED", True
+)
 MARKING_DOCX_PDF_CONVERTER = str(
-    os.environ.get(
+    _runtime_value(
+        "marking_docx_pdf_converter",
         "MARKING_DOCX_PDF_CONVERTER",
         SUBMISSION_CONFIG.get("marking_docx_pdf_converter", "auto"),
     )
@@ -270,18 +311,9 @@ def _load_active_template_questions():
 
 
 def _resolve_docx_pdf_converter(preferred=None):
-    converter = str(preferred or MARKING_DOCX_PDF_CONVERTER or "auto").strip().lower()
-    if converter not in {"auto", "libreoffice", "docx2pdf", "dxpdf"}:
-        converter = "auto"
-
-    if converter == "auto":
-        if shutil.which("soffice") or shutil.which("libreoffice"):
-            return "libreoffice"
-        if importlib.util.find_spec("dxpdf") is not None:
-            return "dxpdf"
-        return "docx2pdf"
-
-    return converter
+    return preview_conversion.resolve_docx_pdf_converter(
+        preferred, default=MARKING_DOCX_PDF_CONVERTER
+    )
 
 
 def generate_code():
@@ -299,97 +331,6 @@ def get_client_ip():
     if forwarded:
         return forwarded.split(",")[0].strip()
     return request.remote_addr
-
-
-def validate_file(area, file_storage):
-    ext = Path(file_storage.filename).suffix.lower()
-    if ext not in area["allowed_extensions"]:
-        return f"'{file_storage.filename}' has an invalid file type for {area['label']} (allowed: {', '.join(area['allowed_extensions'])})."
-
-    file_storage.stream.seek(0, os.SEEK_END)
-    size_bytes = file_storage.stream.tell()
-    file_storage.stream.seek(0)
-    max_bytes = area["max_size_mb"] * 1024 * 1024
-    if size_bytes > max_bytes:
-        return f"'{file_storage.filename}' exceeds the {area['max_size_mb']}MB limit for {area['label']}."
-    if size_bytes == 0:
-        return f"'{file_storage.filename}' is empty."
-    return None
-
-
-def validate_url(area, url_value):
-    value = str(url_value or "").strip()
-    if not value:
-        return f"Please provide a URL for '{area['label']}'."
-
-    parsed = urlparse.urlparse(value)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-        return f"'{value}' is not a valid URL for '{area['label']}'. Use a full http(s) link."
-    return None
-
-
-def _classify_report_files(uploaded_files):
-    if not uploaded_files:
-        raise ValueError("No report files were provided.")
-
-    items = []
-    for uploaded_file in uploaded_files:
-        filename = str(getattr(uploaded_file, "filename", "") or "").strip()
-        if not filename:
-            raise ValueError("One or more report files are missing a filename.")
-        ext = Path(filename).suffix.lower()
-        items.append({"filename": filename, "extension": ext})
-
-    doc_extensions = {".pdf", ".docx"}
-    image_extensions = REPORT_IMAGE_EXTENSIONS
-    doc_count = sum(1 for item in items if item["extension"] in doc_extensions)
-    image_count = sum(1 for item in items if item["extension"] in image_extensions)
-
-    if doc_count and image_count:
-        raise ValueError("Please upload either a PDF/DOCX report or multiple images, not both.")
-    if doc_count:
-        if len(items) != 1 or items[0]["extension"] not in doc_extensions:
-            raise ValueError("Please upload either a single PDF or a single DOCX report.")
-        return {"mode": "single_document", "files": items}
-    if image_count:
-        if any(item["extension"] not in image_extensions for item in items):
-            raise ValueError("Report images must be image files only.")
-        return {"mode": "image_batch", "files": items}
-
-    invalid = ", ".join(item["filename"] for item in items)
-    raise ValueError(f"Unsupported report file type: {invalid}. Please upload PDF, DOCX, or images.")
-
-
-def _convert_report_images_to_pdf(image_paths, output_pdf_path):
-    if not image_paths:
-        raise ValueError("No report images were supplied for conversion.")
-
-    try:
-        from PIL import Image
-        from reportlab.lib.pagesizes import A4
-        from reportlab.pdfgen import canvas
-    except ImportError as exc:
-        raise RuntimeError("Image-to-PDF conversion requires Pillow and reportlab packages.") from exc
-
-    page_size = A4
-    output_pdf_path.parent.mkdir(parents=True, exist_ok=True)
-    pdf_canvas = canvas.Canvas(str(output_pdf_path), pagesize=page_size)
-
-    for image_path in image_paths:
-        with Image.open(image_path) as image:
-            rgb_image = image.convert("RGB")
-            width, height = rgb_image.size
-            page_width, page_height = page_size
-            scale = min(page_width / width, page_height / height)
-            draw_width = width * scale
-            draw_height = height * scale
-            x_offset = (page_width - draw_width) / 2
-            y_offset = (page_height - draw_height) / 2
-            pdf_canvas.setPageSize(page_size)
-            pdf_canvas.drawInlineImage(rgb_image, x_offset, y_offset, width=draw_width, height=draw_height)
-            pdf_canvas.showPage()
-
-    pdf_canvas.save()
 
 
 def _collect_marking_url_links(submission_record, question_id=None):
@@ -417,53 +358,23 @@ def _collect_marking_url_links(submission_record, question_id=None):
 
 
 def _submission_metadata_folder(submission_record):
-    local_files = [Path(file["storage_location"]) for file in submission_record.get("files", [])]
-    if not local_files:
-        return None
-    return local_files[0].parents[1] / "metadata"
+    return submission_paths.submission_metadata_folder(submission_record)
 
 
 def _submission_root_folder(submission_record):
-    local_files = [Path(file["storage_location"]) for file in submission_record.get("files", [])]
-    if not local_files:
-        return None
-    return local_files[0].parents[1]
+    return submission_paths.submission_root_folder(submission_record)
 
 
 def _submission_folder_name(submission_record):
-    name = str(submission_record.get("name") or "").strip()
-    student_id = str(submission_record.get("student_id") or "").strip()
-    code = str(submission_record.get("code") or "").strip()
-    if not student_id:
-        student_id = "unknown_student"
-    if not code:
-        code = "unknown_code"
-    folder_name = f"{student_id}_{secure_filename(name) or 'student'}_{code}"
-    return folder_name.strip("_") or "submission"
+    return submission_paths.submission_folder_name(submission_record)
 
 
 def _resolve_submission_upload_root(submission_record):
-    base_upload_root = Path(STORAGE_ENV["LOCAL_UPLOAD_ROOT"]).resolve()
-    for file_record in submission_record.get("files", []):
-        storage_location = str(file_record.get("storage_location") or "").strip()
-        if not storage_location:
-            continue
-
-        candidate = Path(storage_location)
-        if not candidate.is_absolute():
-            candidate = (PROJECT_ROOT / candidate).resolve()
-        else:
-            candidate = candidate.resolve()
-
-        try:
-            resolved_parent = candidate.parents[1]
-        except IndexError:
-            resolved_parent = candidate.parent
-
-        if resolved_parent.exists() or candidate.name:
-            return resolved_parent
-
-    return base_upload_root / _submission_folder_name(submission_record)
+    return submission_paths.resolve_submission_upload_root(
+        submission_record,
+        STORAGE_ENV["LOCAL_UPLOAD_ROOT"],
+        PROJECT_ROOT,
+    )
 
 
 def _area_applies_to_question(area_key, question_id):
@@ -567,218 +478,53 @@ def _collect_marking_document_files(submission_record, question_id=None):
 
 
 def _resolve_submission_relative_file(submission_record, relative_path):
-    submission_root = _submission_root_folder(submission_record)
-    if not submission_root:
-        return None
-
-    try:
-        resolved_root = submission_root.resolve()
-        candidate = (resolved_root / relative_path).resolve()
-        candidate.relative_to(resolved_root)
-    except (OSError, ValueError):
-        return None
-
-    if not candidate.exists() or not candidate.is_file():
-        return None
-    return candidate
+    return submission_paths.resolve_submission_relative_file(submission_record, relative_path)
 
 
 def _docx_pdf_preview_output_path(submission_record, relative_path, source_path):
-    metadata_folder = _submission_metadata_folder(submission_record)
-    if not metadata_folder:
-        return None
-
-    preview_dir = metadata_folder / MARKING_DOCX_PDF_PREVIEW_DIR
-    preview_dir.mkdir(parents=True, exist_ok=True)
-
-    source_stat = source_path.stat()
-    source_signature = f"{relative_path}|{int(source_stat.st_mtime)}|{source_stat.st_size}"
-    digest = hashlib.sha1(source_signature.encode("utf-8")).hexdigest()[:12]
-    base_name = secure_filename(Path(relative_path).stem) or "document"
-    return preview_dir / f"{base_name}_{digest}.pdf"
-
-
-def _convert_docx_to_pdf_with_docx2pdf(source_docx, target_pdf):
-    try:
-        from docx2pdf import convert as docx2pdf_convert
-    except ImportError as error:
-        raise RuntimeError(
-            "docx2pdf is required for DOCX-to-PDF preview conversion. "
-            "Install dependencies from requirements.txt."
-        ) from error
-
-    try:
-        docx2pdf_convert(str(source_docx.resolve()), str(target_pdf.resolve()))
-    except Exception as error:
-        raise RuntimeError(
-            "docx2pdf conversion failed. On macOS this usually requires Microsoft Word to be installed and available. "
-            f"({error})"
-        ) from error
-
-    if not target_pdf.exists() or target_pdf.stat().st_size == 0:
-        raise RuntimeError("docx2pdf did not produce a valid PDF output.")
-
-
-def _convert_docx_to_pdf_with_dxpdf(source_docx, target_pdf):
-    try:
-        import dxpdf
-    except ImportError as error:
-        raise RuntimeError(
-            "dxpdf is required for DOCX-to-PDF preview conversion. "
-            "Install dependencies from requirements.txt."
-        ) from error
-
-    try:
-        dxpdf.convert_file(str(source_docx.resolve()), str(target_pdf.resolve()))
-    except Exception as error:
-        raise RuntimeError(f"dxpdf conversion failed: {error}") from error
-
-    if not target_pdf.exists() or target_pdf.stat().st_size == 0:
-        raise RuntimeError("dxpdf did not produce a valid PDF output.")
-
-
-def _convert_docx_to_pdf_with_libreoffice(source_docx, target_pdf):
-    soffice = shutil.which("soffice") or shutil.which("libreoffice")
-    if not soffice:
-        raise RuntimeError("LibreOffice is not installed or not available on PATH.")
-
-    output_dir = target_pdf.parent
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    command = [
-        soffice,
-        "--headless",
-        "--nologo",
-        "--nolockcheck",
-        "--convert-to",
-        "pdf",
-        "--outdir",
-        str(output_dir),
-        str(source_docx),
-    ]
-    completed = subprocess.run(command, capture_output=True, text=True)
-    if completed.returncode != 0:
-        raise RuntimeError(
-            f"LibreOffice conversion failed: {completed.stderr.strip() or completed.stdout.strip() or 'unknown error'}"
-        )
-
-    produced_pdf = output_dir / f"{source_docx.stem}.pdf"
-    if produced_pdf.exists() and produced_pdf != target_pdf:
-        if target_pdf.exists():
-            try:
-                target_pdf.unlink()
-            except OSError:
-                pass
-        produced_pdf.replace(target_pdf)
-
-    if not target_pdf.exists() or target_pdf.stat().st_size == 0:
-        raise RuntimeError("LibreOffice did not produce a valid PDF output.")
+    return preview_conversion.docx_pdf_preview_output_path(
+        _submission_metadata_folder(submission_record),
+        relative_path,
+        source_path,
+        MARKING_DOCX_PDF_PREVIEW_DIR,
+    )
 
 
 def _convert_docx_to_pdf(source_docx, target_pdf, converter=None):
-    resolved = _resolve_docx_pdf_converter(converter)
-    if resolved == "libreoffice":
-        return _convert_docx_to_pdf_with_libreoffice(source_docx, target_pdf)
-    if resolved == "docx2pdf":
-        return _convert_docx_to_pdf_with_docx2pdf(source_docx, target_pdf)
-    if resolved == "dxpdf":
-        return _convert_docx_to_pdf_with_dxpdf(source_docx, target_pdf)
-    raise RuntimeError(f"Unsupported DOCX-to-PDF converter: {resolved}")
+    return preview_conversion.convert_docx_to_pdf(
+        source_docx,
+        target_pdf,
+        converter=converter,
+        default_converter=MARKING_DOCX_PDF_CONVERTER,
+    )
 
 
 def _ensure_docx_pdf_preview(submission_record, relative_path, source_path):
-    output_path = _docx_pdf_preview_output_path(submission_record, relative_path, source_path)
-    if not output_path:
-        raise RuntimeError("Could not determine metadata folder for PDF preview output.")
-
-    if output_path.exists():
-        return output_path
-
-    temp_output = output_path.with_suffix(".tmp.pdf")
-    if temp_output.exists():
-        try:
-            temp_output.unlink()
-        except OSError:
-            pass
-
-    _convert_docx_to_pdf(source_path, temp_output)
-    temp_output.replace(output_path)
-    return output_path
+    return preview_conversion.ensure_docx_pdf_preview(
+        _submission_metadata_folder(submission_record),
+        relative_path,
+        source_path,
+        MARKING_DOCX_PDF_PREVIEW_DIR,
+        default_converter=MARKING_DOCX_PDF_CONVERTER,
+    )
 
 
 def _video_preview_output_path(submission_record, relative_path, source_path):
-    metadata_folder = _submission_metadata_folder(submission_record)
-    if not metadata_folder:
-        return None
-
-    preview_dir = metadata_folder / MARKING_VIDEO_PREVIEW_DIR
-    preview_dir.mkdir(parents=True, exist_ok=True)
-
-    source_stat = source_path.stat()
-    source_signature = f"{relative_path}|{int(source_stat.st_mtime)}|{source_stat.st_size}"
-    digest = hashlib.sha1(source_signature.encode("utf-8")).hexdigest()[:12]
-    base_name = secure_filename(Path(relative_path).stem) or "video"
-    return preview_dir / f"{base_name}_{digest}.mp4"
-
-
-def _convert_video_to_mp4_with_ffmpeg(source_video, target_mp4):
-    ffmpeg_bin = shutil.which("ffmpeg")
-    if not ffmpeg_bin:
-        raise RuntimeError(
-            "ffmpeg is required for video fallback conversion. Install ffmpeg and restart the app."
-        )
-
-    output_dir = target_mp4.parent
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    command = [
-        ffmpeg_bin,
-        "-y",
-        "-i",
-        str(source_video),
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "23",
-        "-pix_fmt",
-        "yuv420p",
-        "-movflags",
-        "+faststart",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "128k",
-        str(target_mp4),
-    ]
-    completed = subprocess.run(command, capture_output=True, text=True)
-    if completed.returncode != 0:
-        details = completed.stderr.strip() or completed.stdout.strip() or "unknown ffmpeg error"
-        raise RuntimeError(f"ffmpeg conversion failed: {details}")
-
-    if not target_mp4.exists() or target_mp4.stat().st_size == 0:
-        raise RuntimeError("ffmpeg did not produce a valid MP4 output.")
+    return preview_conversion.video_preview_output_path(
+        _submission_metadata_folder(submission_record),
+        relative_path,
+        source_path,
+        MARKING_VIDEO_PREVIEW_DIR,
+    )
 
 
 def _ensure_video_mp4_preview(submission_record, relative_path, source_path):
-    output_path = _video_preview_output_path(submission_record, relative_path, source_path)
-    if not output_path:
-        raise RuntimeError("Could not determine metadata folder for video preview output.")
-
-    if output_path.exists():
-        return output_path
-
-    temp_output = output_path.with_suffix(".tmp.mp4")
-    if temp_output.exists():
-        try:
-            temp_output.unlink()
-        except OSError:
-            pass
-
-    _convert_video_to_mp4_with_ffmpeg(source_path, temp_output)
-    temp_output.replace(output_path)
-    return output_path
+    return preview_conversion.ensure_video_mp4_preview(
+        _submission_metadata_folder(submission_record),
+        relative_path,
+        source_path,
+        MARKING_VIDEO_PREVIEW_DIR,
+    )
 
 
 def _find_submission_run_path(submission_record, run_filename):
@@ -910,9 +656,9 @@ def _run_ampl_analysis_for_submission(submission_record):
             "timed_out": 0,
         }
 
-    timeout_seconds = int(os.environ.get("AMPL_RUN_TIMEOUT_SECONDS", "120"))
+    timeout_seconds = _runtime_int("ampl_run_timeout_seconds", "AMPL_RUN_TIMEOUT_SECONDS", 120)
     runner = Path(__file__).parent / "src" / "analysis_runner.py"
-    ampl_python = os.environ.get("AMPL_PYTHON", sys.executable)
+    ampl_python = _runtime_value("ampl_python", "AMPL_PYTHON", sys.executable) or sys.executable
     submission_root = run_files[0].parents[1]
     result_root = submission_root / "analysis"
 
@@ -1334,7 +1080,7 @@ def _generate_ai_marking_suggestion(question_id, prompt, answer, marks_label):
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    timeout_seconds = int(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "90"))
+    timeout_seconds = _runtime_int("ollama_timeout_seconds", "OLLAMA_TIMEOUT_SECONDS", 90)
 
     with urlrequest.urlopen(req, timeout=timeout_seconds) as resp:
         body = json.loads(resp.read().decode("utf-8"))
@@ -1696,7 +1442,9 @@ def api_submit():
             email_util.send_confirmation_email(
                 gmail_address=os.environ.get("GMAIL_ADDRESS"),
                 gmail_app_password=os.environ.get("GMAIL_APP_PASSWORD"),
-                from_name=os.environ.get("EMAIL_FROM_NAME", "Assignment Submission System"),
+                from_name=_runtime_value(
+                    "email_from_name", "EMAIL_FROM_NAME", "Assignment Submission System"
+                ),
                 to_address=email, name=name, student_id=student_id, code=code,
                 filenames=saved_filenames, assignment_title=SUBMISSION_CONFIG["assignment_title"],
                 declared_labels=[a["label"] for a in declared_areas],
@@ -1705,6 +1453,11 @@ def api_submit():
             db.mark_email_sent(submission_id, True)
         except Exception as e:
             app.logger.warning(f"Email send failed for submission {submission_id}: {e}")
+
+        if _runtime_bool("ampl_execute_on_submission", "AMPL_EXECUTE_ON_SUBMISSION", False):
+            stored_submission = db.get_submission(submission_id)
+            if stored_submission:
+                _run_ampl_analysis_for_submission(stored_submission)
 
         db.update_submission_status(submission_id, "completed")
 
@@ -2415,6 +2168,10 @@ def admin_submission_analysis(submission_id):
         "admin_analysis.html",
         submission=submission,
         analysis_text_files_by_run=analysis_text_files_by_run,
+        analysis_sections_by_run={
+            run["id"]: analysis_display.build_analysis_sections(run)
+            for run in submission["analysis_runs"]
+        },
         form_version=SUBMISSION_CONFIG.get("form_version"),
     )
 
@@ -2612,6 +2369,7 @@ def admin_submission_metadata(submission_id):
                     "filename": data.get("original_filename", metadata_path.name),
                     "display_name": display_name,
                     "data": data,
+                    "sections": metadata_display.build_metadata_display(data),
                 })
             except (OSError, json.JSONDecodeError):
                 continue
@@ -3519,5 +3277,11 @@ def admin_download_file(file_id):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run the assignment submission app.")
+    parser.add_argument("--host", help="Host interface; defaults to config.json runtime.host.")
+    parser.add_argument("--port", type=int, help="Port; defaults to config.json runtime.port.")
+    startup_args = parser.parse_args()
     db.init_db()
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
+    host = startup_args.host or _runtime_value("host", "HOST", "0.0.0.0")
+    port = startup_args.port if startup_args.port is not None else _runtime_int("port", "PORT", 5001)
+    app.run(host=host, port=port, debug=False)

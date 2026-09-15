@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.6.0 (2026-09-10)
+
+### Added
+- AMPL ZIP submission area for Question 2 in the active configuration
+- Optional automatic AMPL execution after submission via `runtime.ampl_execute_on_submission`
+- Readable metadata summaries with raw JSON retained as an expandable audit view
+- Readable AMPL statistics and diagnostics with path fields excluded from the display
+- Stacked or side-by-side document previews in the marking workspace
+- Persistent runtime configuration for host, port, storage, preview, AMPL, and Ollama settings
+
+### Changed
+- Command-line `--host` and `--port` options now override environment and config defaults
+- AMPL execution remains manual by default; automatic execution is disabled unless explicitly enabled
+- Extracted report handling, validation, preview conversion, path resolution, and display formatting into focused modules
+
+### Fixed
+- Preserved existing upload, marking, preview, and analysis behavior through compatibility adapters during restructuring
+
 ## v1.5.1 (2026-09-08)
 
 ### Added

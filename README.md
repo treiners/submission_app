@@ -10,7 +10,7 @@ code, and give you an admin page to browse submissions.
 - `db.py` — SQLite schema and queries
 - `storage.py` — storage backends (local / Dropbox / OneDrive), pluggable
 - `email_util.py` — Gmail SMTP confirmation email
-- `config.json` — submission rules (areas, allowed file types, size/count limits) — edit freely
+- `config.json` — submission rules and non-secret runtime defaults — edit freely
 - `.env.example` — secrets template (copy to `.env`, never commit `.env`)
 - `templates/`, `static/` — the submission form and admin pages
 - `get_dropbox_refresh_token.py` — one-time helper for Dropbox setup
@@ -28,7 +28,7 @@ cp .env.example .env
 Edit `.env`:
 - Set `SECRET_KEY` to a long random string.
 - Set `ADMIN_USERNAME` / `ADMIN_PASSWORD`.
-- Set `PORT` if you want a port other than `5000`.
+- Set `PORT` to override the `runtime.port` value in `config.json`.
 - Leave `STORAGE_BACKEND=local` to start — this works immediately, no extra setup.
 
 Run it:
@@ -36,6 +36,23 @@ Run it:
 python3 app.py
 ```
 Visit `http://localhost:<PORT>` for the form and `http://localhost:<PORT>/admin` for the admin page.
+
+The default host and port are configured under `runtime` in `config.json`. You can
+override them for one start without editing the file:
+
+```bash
+python3 app.py --port 5002
+python3 app.py --host 127.0.0.1 --port 5002
+```
+
+Environment variables such as `PORT` and `HOST` take precedence over `config.json`;
+command-line options take precedence over both. Secrets and provider credentials
+remain environment variables and should not be placed in `config.json`.
+
+Set `runtime.ampl_execute_on_submission` to `true` to run submitted AMPL `.run`
+files automatically after upload. It is `false` by default; staff can run analysis
+manually from the admin page. Automatic execution is synchronous and subject to
+`runtime.ampl_run_timeout_seconds`.
 
 To run two local instances, for example:
 
@@ -53,7 +70,7 @@ Edit `config.json` — no code changes needed:
 ```json
 {
   "assignment_title": "Assignment 1 Submission",
-  "form_version": "1.5.1",
+  "form_version": "1.6.0",
   "marking_template_docx": "marking_template/marking_template_MATH5007_A1P1_2026_S2.docx",
   "marking_extraction_areas": ["report"],
   "marking_preview_max_images": 12,
@@ -174,6 +191,9 @@ The marking preview page supports two review modes:
 Recent UI behavior in marking preview:
 - Split workspace with independent panes (left: marking, right: source document).
 - Draggable divider; pane width is remembered in local storage.
+- Document split view supports stacked top/bottom or side-by-side columns. The
+  orientation and pane sizing are remembered in local storage; narrow screens
+  use the stacked layout automatically.
 - Report/PDF is loaded by default when available; DOCX view and video playback remain selectable.
 - Header controls stay visible while scrolling the marking pane.
 - Keyboard shortcuts: `p` for previous, `n` for next.
@@ -335,9 +355,24 @@ version, installed `amplpy` version/path information, module-load status,
 object is stored with each result; additional model statistics can be added
 later without changing the upload format.
 
-Analysis runs are admin-triggered and execute sequentially. Uploaded AMPL
-scripts are untrusted input: use this feature only on a controlled local
+Analysis runs are admin-triggered and execute sequentially by default. To run
+submitted `.run` files automatically after upload, set this in `config.json`:
+
+```json
+{
+  "runtime": {
+    "ampl_execute_on_submission": true
+  }
+}
+```
+
+Automatic execution is synchronous and uses `ampl_run_timeout_seconds`. Uploaded
+AMPL scripts are untrusted input: use this feature only on a controlled local
 machine until a process or container sandbox is added.
+
+The admin metadata and AMPL analysis pages show formatted summaries for quick
+review. Raw metadata JSON remains available in an expandable section, while
+diagnostic path fields are excluded from the visible AMPL summary.
 
 ### Dropbox
 1. Create an app at https://www.dropbox.com/developers/apps
