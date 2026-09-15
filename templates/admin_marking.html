@@ -456,6 +456,17 @@
           <button type="button" id="marking-doc-layout-toggle" class="marking-doc-layout-toggle" aria-pressed="false" data-layout="single">Split view</button>
           {% endif %}
         </div>
+        {% if marking_url_links %}
+        <div class="marking-url-links" style="margin: 0 0 14px;">
+          <h3 style="margin:0 0 8px; font-size:0.95rem;">URL submissions</h3>
+          {% for url_link in marking_url_links %}
+          <div class="file-chip" style="margin-top:8px;">
+            <span>{{ url_link.label }}</span>
+            <a href="{{ url_link.url }}" target="_blank" rel="noopener" style="color:var(--accent); font-size:0.82rem; font-weight:600;">Open</a>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
         {% if marking_document_options %}
         <div class="marking-doc-layout" data-layout="single">
           <div class="marking-doc-pane marking-doc-pane-primary" data-pane="primary">

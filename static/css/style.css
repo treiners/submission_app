@@ -179,6 +179,21 @@ label {
 
 .field { margin-bottom: 20px; }
 
+.submission-area-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 18px 18px 8px;
+  margin-bottom: 18px;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.submission-area-panel.area-missing {
+  background: #fff5f4;
+  border-color: #f2c8c3;
+  box-shadow: inset 0 0 0 1px rgba(191, 96, 84, 0.08);
+}
+
 input[type="text"],
 input[type="email"],
 input[type="password"] {

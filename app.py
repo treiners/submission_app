@@ -14,7 +14,7 @@ import shlex
 from io import BytesIO
 from functools import wraps
 from pathlib import Path
-from urllib import error as urlerror, request as urlrequest
+from urllib import error as urlerror, parse as urlparse, request as urlrequest
 
 from dotenv import load_dotenv
 from flask import (
@@ -75,6 +75,7 @@ CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ"  # letters only, excludes I/O to redu
 CODE_PATTERN = re.compile(r"^[A-Z]{6}$")
 OLLAMA_ENDPOINT = os.environ.get("OLLAMA_ENDPOINT", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
+REPORT_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff"}
 MARKING_TEXT_PREVIEW_EXTENSIONS = {".mod", ".run", ".dat"}
 MARKING_AMPL_PREVIEW_TEXT_EXTENSIONS = {".mod", ".run", ".dat", ".json", ".txt", ".log"}
 MARKING_TEXT_PREVIEW_MAX_BYTES = int(os.environ.get("MARKING_TEXT_PREVIEW_MAX_BYTES", str(2 * 1024 * 1024)))
@@ -314,6 +315,105 @@ def validate_file(area, file_storage):
     if size_bytes == 0:
         return f"'{file_storage.filename}' is empty."
     return None
+
+
+def validate_url(area, url_value):
+    value = str(url_value or "").strip()
+    if not value:
+        return f"Please provide a URL for '{area['label']}'."
+
+    parsed = urlparse.urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return f"'{value}' is not a valid URL for '{area['label']}'. Use a full http(s) link."
+    return None
+
+
+def _classify_report_files(uploaded_files):
+    if not uploaded_files:
+        raise ValueError("No report files were provided.")
+
+    items = []
+    for uploaded_file in uploaded_files:
+        filename = str(getattr(uploaded_file, "filename", "") or "").strip()
+        if not filename:
+            raise ValueError("One or more report files are missing a filename.")
+        ext = Path(filename).suffix.lower()
+        items.append({"filename": filename, "extension": ext})
+
+    doc_extensions = {".pdf", ".docx"}
+    image_extensions = REPORT_IMAGE_EXTENSIONS
+    doc_count = sum(1 for item in items if item["extension"] in doc_extensions)
+    image_count = sum(1 for item in items if item["extension"] in image_extensions)
+
+    if doc_count and image_count:
+        raise ValueError("Please upload either a PDF/DOCX report or multiple images, not both.")
+    if doc_count:
+        if len(items) != 1 or items[0]["extension"] not in doc_extensions:
+            raise ValueError("Please upload either a single PDF or a single DOCX report.")
+        return {"mode": "single_document", "files": items}
+    if image_count:
+        if any(item["extension"] not in image_extensions for item in items):
+            raise ValueError("Report images must be image files only.")
+        return {"mode": "image_batch", "files": items}
+
+    invalid = ", ".join(item["filename"] for item in items)
+    raise ValueError(f"Unsupported report file type: {invalid}. Please upload PDF, DOCX, or images.")
+
+
+def _convert_report_images_to_pdf(image_paths, output_pdf_path):
+    if not image_paths:
+        raise ValueError("No report images were supplied for conversion.")
+
+    try:
+        from PIL import Image
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas
+    except ImportError as exc:
+        raise RuntimeError("Image-to-PDF conversion requires Pillow and reportlab packages.") from exc
+
+    page_size = A4
+    output_pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    pdf_canvas = canvas.Canvas(str(output_pdf_path), pagesize=page_size)
+
+    for image_path in image_paths:
+        with Image.open(image_path) as image:
+            rgb_image = image.convert("RGB")
+            width, height = rgb_image.size
+            page_width, page_height = page_size
+            scale = min(page_width / width, page_height / height)
+            draw_width = width * scale
+            draw_height = height * scale
+            x_offset = (page_width - draw_width) / 2
+            y_offset = (page_height - draw_height) / 2
+            pdf_canvas.setPageSize(page_size)
+            pdf_canvas.drawInlineImage(rgb_image, x_offset, y_offset, width=draw_width, height=draw_height)
+            pdf_canvas.showPage()
+
+    pdf_canvas.save()
+
+
+def _collect_marking_url_links(submission_record, question_id=None):
+    entries = []
+    seen = set()
+    for file_record in submission_record.get("files", []):
+        area_key = file_record.get("area_key")
+        if question_id and not _area_applies_to_question(area_key, question_id):
+            continue
+
+        storage_location = str(file_record.get("storage_location") or "").strip()
+        if not storage_location:
+            continue
+        if not (storage_location.startswith("http://") or storage_location.startswith("https://")):
+            continue
+        if storage_location in seen:
+            continue
+        seen.add(storage_location)
+        entries.append({
+            "url": storage_location,
+            "label": f"{file_record.get('area_label') or area_key or 'URL'}: {storage_location}",
+            "area_label": file_record.get("area_label") or area_key or "URL",
+        })
+    return entries
 
 
 def _submission_metadata_folder(submission_record):
@@ -1343,10 +1443,37 @@ def api_submit():
     # Validate every configured area: satisfied by either an attached file, or
     # the "I declare that I did not upload this file" checkbox.
     files_by_area = {}
+    url_by_area = {}
     declared_areas = []
     for area in SUBMISSION_CONFIG["areas"]:
         key = area["key"]
+        area_type = area.get("type", "file")
         declared = request.form.get(f"{key}_declared") == "true"
+
+        if area_type == "url":
+            value = request.form.get(key, "").strip()
+            if declared:
+                if value:
+                    errors.append(
+                        f"You entered a URL for '{area['label']}' but also marked it as "
+                        f"not submitted. Please remove the URL or untick the box."
+                    )
+                    continue
+                declared_areas.append(area)
+                continue
+            if not value:
+                errors.append(
+                    f"Please provide a URL for '{area['label']}', or tick the box "
+                    f"confirming you did not submit it."
+                )
+                continue
+            err = validate_url(area, value)
+            if err:
+                errors.append(err)
+                continue
+            url_by_area[key] = value
+            continue
+
         uploaded = request.files.getlist(key)
         uploaded = [f for f in uploaded if f and f.filename]
 
@@ -1400,6 +1527,50 @@ def api_submit():
         with tempfile.TemporaryDirectory() as tmpdir:
             for area_key, files in files_by_area.items():
                 area = AREAS_BY_KEY[area_key]
+
+                if area_key == "report":
+                    classification = _classify_report_files(files)
+                    if classification["mode"] == "image_batch":
+                        image_paths = []
+                        for f in files:
+                            safe_name = secure_filename(f.filename)
+                            tmp_path = Path(tmpdir) / safe_name
+                            f.save(tmp_path)
+                            image_paths.append(tmp_path)
+
+                        report_pdf_path = Path(tmpdir) / "report.pdf"
+                        _convert_report_images_to_pdf(image_paths, report_pdf_path)
+
+                        area_folder = f"{dest_folder}/{area_key}"
+                        try:
+                            result = primary_backend.upload_file(report_pdf_path, area_folder, "report.pdf")
+                        except storage.StorageError:
+                            result = fallback_backend.upload_file(report_pdf_path, area_folder, "report.pdf")
+                            used_fallback = True
+
+                        file_metadata = metadata.extract_file_metadata(report_pdf_path, "report.pdf", area_key)
+                        area_scope = AREA_QUESTION_MAP.get(area_key)
+                        file_metadata["question_scope"] = sorted(area_scope) if area_scope else "all"
+                        metadata_path = (
+                            Path(STORAGE_ENV["LOCAL_UPLOAD_ROOT"])
+                            / dest_folder
+                            / "metadata"
+                            / f"{area_key}_report.pdf.json"
+                        )
+                        metadata.write_metadata(metadata_path, file_metadata)
+
+                        db.add_submission_file(
+                            submission_id=submission_id,
+                            area_key=area_key,
+                            area_label=area["label"],
+                            original_filename="report.pdf",
+                            stored_filename="report.pdf",
+                            storage_location=result["location"],
+                            size_bytes=report_pdf_path.stat().st_size,
+                        )
+                        saved_filenames.append("report.pdf")
+                        continue
+
                 for f in files:
                     safe_name = secure_filename(f.filename)
                     tmp_path = Path(tmpdir) / safe_name
@@ -1494,6 +1665,19 @@ def api_submit():
                                 storage_location=extracted_result["location"],
                                 size_bytes=extracted_path.stat().st_size,
                             )
+
+            for area_key, url_value in url_by_area.items():
+                area = AREAS_BY_KEY[area_key]
+                db.add_submission_file(
+                    submission_id=submission_id,
+                    area_key=area_key,
+                    area_label=area["label"],
+                    original_filename=url_value,
+                    stored_filename="url_submission",
+                    storage_location=url_value,
+                    size_bytes=0,
+                )
+                saved_filenames.append(url_value)
 
         for area in declared_areas:
             db.add_declaration(submission_id, area["key"], area["label"])
@@ -2721,6 +2905,7 @@ def admin_submission_marking(submission_id):
 
     active_question_for_files = selected_question if view_mode == "question" else None
     marking_text_files = _collect_marking_text_files(marking_text_submission, question_id=active_question_for_files)
+    marking_url_links = _collect_marking_url_links(marking_text_submission, question_id=active_question_for_files)
     marking_document_files = _collect_marking_document_files(marking_text_submission, question_id=active_question_for_files)
     marking_ampl_preview_files = _collect_marking_ampl_preview_files(
         marking_text_submission,
@@ -2815,6 +3000,7 @@ def admin_submission_marking(submission_id):
         student_all_marked=student_all_marked,
         question_all_marked=question_all_marked,
         marking_text_files=marking_text_files,
+        marking_url_links=marking_url_links,
         marking_document_options=marking_document_options,
         marking_text_submission_id=marking_text_submission["id"],
         form_version=SUBMISSION_CONFIG.get("form_version"),

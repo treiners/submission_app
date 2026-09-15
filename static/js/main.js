@@ -2,7 +2,9 @@
   const areas = window.SUBMISSION_AREAS || [];
   const areaState = {}; // key -> { files: File[], declared: bool }
 
-  areas.forEach(a => { areaState[a.key] = { files: [], declared: false }; });
+  areas.forEach(a => {
+    areaState[a.key] = { files: [], value: "", declared: false };
+  });
 
   function humanSize(bytes) {
     if (bytes < 1024) return bytes + " B";
@@ -28,8 +30,25 @@
     return null;
   }
 
+  function updateAreaPanelState(area) {
+    const panel = document.querySelector(`[data-area-panel="${area.key}"]`);
+    if (!panel) return;
+
+    const state = areaState[area.key];
+    const urlInput = document.querySelector(`input[data-area="${area.key}"][type="url"]`);
+    const hasContent = area.type === "url"
+      ? Boolean(urlInput && urlInput.value.trim())
+      : state.files.length > 0;
+
+    panel.classList.toggle("area-missing", !state.declared && !hasContent);
+  }
+
   function renderFileList(area) {
     const listEl = document.querySelector(`[data-area-list="${area.key}"]`);
+    if (!listEl) {
+      updateAreaPanelState(area);
+      return;
+    }
     listEl.innerHTML = "";
     areaState[area.key].files.forEach((file, idx) => {
       const chip = document.createElement("div");
@@ -42,26 +61,32 @@
       btn.addEventListener("click", () => {
         areaState[area.key].files.splice(idx, 1);
         renderFileList(area);
+        updateAreaPanelState(area);
       });
       chip.appendChild(btn);
       listEl.appendChild(chip);
     });
+    updateAreaPanelState(area);
   }
 
   function setDeclared(area, declared) {
     const state = areaState[area.key];
     const checkbox = document.querySelector(`.declare-checkbox[data-declare="${area.key}"]`);
     const zone = document.querySelector(`.dropzone[data-area="${area.key}"]`);
+    const urlInput = document.querySelector(`input[data-area="${area.key}"][type="url"]`);
 
     state.declared = declared;
     checkbox.checked = declared;
-    zone.classList.toggle("disabled", declared);
+    if (zone) zone.classList.toggle("disabled", declared);
+    if (urlInput) urlInput.disabled = declared;
 
     if (declared) {
-      // Declaring "not submitted" clears any files already chosen for this area.
       state.files = [];
+      state.value = "";
+      if (urlInput) urlInput.value = "";
       renderFileList(area);
     }
+    updateAreaPanelState(area);
   }
 
   function addFiles(area, fileList) {
@@ -111,39 +136,50 @@
   // Wire up each dropzone + its declaration checkbox
   areas.forEach(area => {
     const zone = document.querySelector(`.dropzone[data-area="${area.key}"]`);
-    const input = zone.querySelector('input[type="file"]');
+    const input = zone ? zone.querySelector('input[type="file"]') : null;
     const checkbox = document.querySelector(`.declare-checkbox[data-declare="${area.key}"]`);
+    const urlInput = document.querySelector(`input[data-area="${area.key}"][type="url"]`);
 
-    zone.addEventListener("click", () => {
-      if (!areaState[area.key].declared) input.click();
-    });
-    input.addEventListener("change", () => {
-      addFiles(area, input.files);
-      input.value = ""; // allow re-selecting the same file
-    });
+    if (zone && input) {
+      zone.addEventListener("click", () => {
+        if (!areaState[area.key].declared) input.click();
+      });
+      input.addEventListener("change", () => {
+        addFiles(area, input.files);
+        input.value = "";
+      });
+
+      ["dragenter", "dragover"].forEach(evt => {
+        zone.addEventListener(evt, (e) => {
+          e.preventDefault();
+          if (!areaState[area.key].declared) zone.classList.add("dragover");
+        });
+      });
+      ["dragleave", "drop"].forEach(evt => {
+        zone.addEventListener(evt, (e) => {
+          e.preventDefault();
+          zone.classList.remove("dragover");
+        });
+      });
+      zone.addEventListener("drop", (e) => {
+        if (areaState[area.key].declared) return;
+        if (e.dataTransfer.files && e.dataTransfer.files.length) {
+          addFiles(area, e.dataTransfer.files);
+        }
+      });
+    }
+
+    if (urlInput) {
+      urlInput.addEventListener("input", () => {
+        areaState[area.key].value = urlInput.value.trim();
+        updateAreaPanelState(area);
+      });
+    }
 
     checkbox.addEventListener("change", () => {
       setDeclared(area, checkbox.checked);
     });
-
-    ["dragenter", "dragover"].forEach(evt => {
-      zone.addEventListener(evt, (e) => {
-        e.preventDefault();
-        if (!areaState[area.key].declared) zone.classList.add("dragover");
-      });
-    });
-    ["dragleave", "drop"].forEach(evt => {
-      zone.addEventListener(evt, (e) => {
-        e.preventDefault();
-        zone.classList.remove("dragover");
-      });
-    });
-    zone.addEventListener("drop", (e) => {
-      if (areaState[area.key].declared) return;
-      if (e.dataTransfer.files && e.dataTransfer.files.length) {
-        addFiles(area, e.dataTransfer.files);
-      }
-    });
+    updateAreaPanelState(area);
   });
 
   // Submit
@@ -168,7 +204,12 @@
     if (!email) errors.push("Email is required.");
     areas.forEach(area => {
       const state = areaState[area.key];
-      if (!state.declared && state.files.length === 0) {
+      const urlInput = document.querySelector(`input[data-area="${area.key}"][type="url"]`);
+      if (area.type === "url") {
+        if (!state.declared && !(urlInput && urlInput.value.trim())) {
+          errors.push(`Please provide a URL for '${area.label}', or tick the box confirming you did not submit it.`);
+        }
+      } else if (!state.declared && state.files.length === 0) {
         errors.push(`Please attach a file for '${area.label}', or tick the box confirming you did not submit it.`);
       }
     });
@@ -183,7 +224,12 @@
     areas.forEach(area => {
       const state = areaState[area.key];
       formData.append(`${area.key}_declared`, state.declared ? "true" : "false");
-      state.files.forEach(file => formData.append(area.key, file));
+      if (area.type === "url") {
+        const urlValue = document.querySelector(`input[data-area="${area.key}"][type="url"]`)?.value.trim() || "";
+        if (urlValue) formData.append(area.key, urlValue);
+      } else {
+        state.files.forEach(file => formData.append(area.key, file));
+      }
     });
 
     submitBtn.disabled = true;
