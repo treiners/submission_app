@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.6.1 (2026-10-01)
+
+### Added
+- Flask route regression coverage for admin marking authentication, assessment saves, AI suggestion requests, and re-extraction safeguards
+- Unit coverage for marking question assembly and AI response handling
+- Navigation icons to declutter the inteface.
+
+### Changed
+- Extracted marking question/answer transformations and AI suggestion generation into `src/marking_service.py`; Flask routes remain in `app.py`
+- Updated the README module overview to match the current `src/` layout
+
 ## v1.6.0 (2026-09-10)
 
 ### Added

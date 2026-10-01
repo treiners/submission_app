@@ -34,11 +34,11 @@
           This submission is currently excluded from marking navigation.
         </div>
         {% endif %}
-        <div class="admin-action-row">
-          <a class="action-btn" href="{{ url_for('admin_submission_detail', submission_id=submission.id) }}">Submission overview</a>
-          <a class="action-btn" href="{{ url_for('admin_submission_metadata', submission_id=submission.id) }}">View file metadata</a>
-          <span class="action-btn active">View marking preview</span>
-          <a class="action-btn" href="{{ url_for('admin_submission_analysis', submission_id=submission.id) }}">View AMPL analysis</a>
+        <div class="admin-action-row admin-submission-actions">
+          <a class="admin-nav-icon" href="{{ url_for('admin_submission_detail', submission_id=submission.id) }}" title="Submission overview" aria-label="Submission overview"><svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#overview"></use></svg></a>
+          <a class="admin-nav-icon" href="{{ url_for('admin_submission_metadata', submission_id=submission.id) }}" title="View file metadata" aria-label="View file metadata"><svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#metadata"></use></svg></a>
+          <span class="admin-nav-icon active" title="View marking preview" aria-label="View marking preview" aria-current="page"><svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#marking"></use></svg></span>
+          <a class="admin-nav-icon" href="{{ url_for('admin_submission_analysis', submission_id=submission.id) }}" title="View AMPL analysis" aria-label="View AMPL analysis"><svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#analysis"></use></svg></a>
           <form method="POST" action="{{ url_for('admin_reextract_marking_preview', submission_id=submission.id) }}" class="reextract-form reextract-header-form">
             <input type="hidden" name="view" value="{{ view_mode }}">
             <input type="hidden" name="selected_question" value="{{ selected_question or '' }}">
@@ -47,41 +47,9 @@
             <input type="hidden" name="marking" value="{{ dashboard_marking_filter }}">
             <input type="hidden" name="sort" value="{{ dashboard_sort_key }}">
             <input type="hidden" name="dir" value="{{ dashboard_sort_dir }}">
-            <button type="submit" class="action-btn reextract-action-btn" {% if not can_reextract %}disabled{% endif %}>Re-extract marking preview</button>
+            <button type="submit" class="admin-nav-icon admin-nav-icon-button reextract-action-btn" title="Re-extract marking preview" aria-label="Re-extract marking preview" {% if not can_reextract %}disabled{% endif %}><svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#refresh"></use></svg></button>
           </form>
         </div>
-
-        {% if view_mode == 'student' %}
-        <div class="marking-nav marking-nav-header">
-          {% if prev_submission_id %}
-            <a class="marking-nav-link" data-nav-role="prev" href="{{ url_for('admin_submission_marking', submission_id=prev_submission_id, view='student', unmarked=('1' if show_only_unmarked else None), q=dashboard_search or None, marking=dashboard_marking_filter, sort=dashboard_sort_key, dir=dashboard_sort_dir) }}">&larr; Previous submission</a>
-          {% else %}
-            <span class="marking-nav-disabled">&larr; Previous submission</span>
-          {% endif %}
-
-          {% if next_submission_id %}
-            <a class="marking-nav-link" data-nav-role="next" href="{{ url_for('admin_submission_marking', submission_id=next_submission_id, view='student', unmarked=('1' if show_only_unmarked else None), q=dashboard_search or None, marking=dashboard_marking_filter, sort=dashboard_sort_key, dir=dashboard_sort_dir) }}">Next submission &rarr;</a>
-          {% else %}
-            <span class="marking-nav-disabled">Next submission &rarr;</span>
-          {% endif %}
-        </div>
-        <div class="marking-nav-hint marking-nav-hint-header">Hotkeys: <strong>p</strong> previous, <strong>n</strong> next</div>
-        {% elif view_mode == 'question' and question_entry and not question_all_marked %}
-        <div class="marking-nav marking-nav-header">
-          {% if question_prev_submission_id %}
-            <a class="marking-nav-link" data-nav-role="prev" href="{{ url_for('admin_submission_marking', submission_id=question_prev_submission_id, view='question', question=selected_question, unmarked=('1' if show_only_unmarked else None), q=dashboard_search or None, marking=dashboard_marking_filter, sort=dashboard_sort_key, dir=dashboard_sort_dir) }}">&larr; Previous student</a>
-          {% else %}
-            <span class="marking-nav-disabled">&larr; Previous student</span>
-          {% endif %}
-
-          {% if question_next_submission_id %}
-            <a class="marking-nav-link" data-nav-role="next" href="{{ url_for('admin_submission_marking', submission_id=question_next_submission_id, view='question', question=selected_question, unmarked=('1' if show_only_unmarked else None), q=dashboard_search or None, marking=dashboard_marking_filter, sort=dashboard_sort_key, dir=dashboard_sort_dir) }}">Next student &rarr;</a>
-          {% else %}
-            <span class="marking-nav-disabled">Next student &rarr;</span>
-          {% endif %}
-        </div>
-        <div class="marking-nav-hint marking-nav-hint-header">Hotkeys: <strong>p</strong> previous, <strong>n</strong> next</div>
-        {% endif %}
 
         {% with messages = get_flashed_messages() %}
           {% if messages %}<div class="flash">{{ messages[-1] }}</div>{% endif %}
@@ -94,6 +62,20 @@
         {% endif %}
 
         <div class="marking-toolbar">
+          {% if view_mode == 'student' %}
+            {% if prev_submission_id %}
+              <a class="marking-nav-link marking-nav-icon" data-nav-role="prev" title="Previous submission (P)" aria-label="Previous submission, keyboard shortcut P" href="{{ url_for('admin_submission_marking', submission_id=prev_submission_id, view='student', unmarked=('1' if show_only_unmarked else None), q=dashboard_search or None, marking=dashboard_marking_filter, sort=dashboard_sort_key, dir=dashboard_sort_dir) }}"><svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#previous"></use></svg></a>
+            {% else %}
+              <span class="marking-nav-disabled marking-nav-icon" title="Previous submission (P)" aria-label="Previous submission, keyboard shortcut P"><svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#previous"></use></svg></span>
+            {% endif %}
+          {% elif view_mode == 'question' and question_entry and not question_all_marked %}
+            {% if question_prev_submission_id %}
+              <a class="marking-nav-link marking-nav-icon" data-nav-role="prev" title="Previous student (P)" aria-label="Previous student, keyboard shortcut P" href="{{ url_for('admin_submission_marking', submission_id=question_prev_submission_id, view='question', question=selected_question, unmarked=('1' if show_only_unmarked else None), q=dashboard_search or None, marking=dashboard_marking_filter, sort=dashboard_sort_key, dir=dashboard_sort_dir) }}"><svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#previous"></use></svg></a>
+            {% else %}
+              <span class="marking-nav-disabled marking-nav-icon" title="Previous student (P)" aria-label="Previous student, keyboard shortcut P"><svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#previous"></use></svg></span>
+            {% endif %}
+          {% endif %}
+
           <form method="GET" action="{{ url_for('admin_submission_marking', submission_id=submission.id) }}">
             <input type="hidden" name="view" value="student">
             {% if show_only_unmarked %}<input type="hidden" name="unmarked" value="1">{% endif %}
@@ -101,7 +83,7 @@
             <input type="hidden" name="marking" value="{{ dashboard_marking_filter }}">
             <input type="hidden" name="sort" value="{{ dashboard_sort_key }}">
             <input type="hidden" name="dir" value="{{ dashboard_sort_dir }}">
-            <button type="submit" class="marking-tab-btn {% if view_mode == 'student' %}active{% endif %}">Per student</button>
+            <button type="submit" class="marking-tab-btn marking-mode-icon {% if view_mode == 'student' %}active{% endif %}" title="Per student" aria-label="Per student" aria-current="{% if view_mode == 'student' %}page{% else %}false{% endif %}"><svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#student"></use></svg></button>
           </form>
           <form method="GET" action="{{ url_for('admin_submission_marking', submission_id=submission.id) }}">
             <input type="hidden" name="view" value="question">
@@ -111,11 +93,11 @@
             <input type="hidden" name="marking" value="{{ dashboard_marking_filter }}">
             <input type="hidden" name="sort" value="{{ dashboard_sort_key }}">
             <input type="hidden" name="dir" value="{{ dashboard_sort_dir }}">
-            <button type="submit" class="marking-tab-btn {% if view_mode == 'question' %}active{% endif %}">Per question</button>
+            <button type="submit" class="marking-tab-btn marking-mode-icon {% if view_mode == 'question' %}active{% endif %}" title="Per question" aria-label="Per question" aria-current="{% if view_mode == 'question' %}page{% else %}false{% endif %}"><svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#question"></use></svg></button>
           </form>
-          <label class="marking-auto-toggle">
-            <input type="checkbox" id="ai-autodraft-toggle" checked>
-            Auto AI draft
+          <label class="marking-auto-toggle marking-icon-toggle" title="Auto AI draft">
+            <input type="checkbox" id="ai-autodraft-toggle" aria-label="Auto AI draft" checked>
+            <svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#sparkles"></use></svg>
           </label>
           <form method="GET" action="{{ url_for('admin_submission_marking', submission_id=submission.id) }}">
             <input type="hidden" name="view" value="{{ view_mode }}">
@@ -126,11 +108,25 @@
             <input type="hidden" name="marking" value="{{ dashboard_marking_filter }}">
             <input type="hidden" name="sort" value="{{ dashboard_sort_key }}">
             <input type="hidden" name="dir" value="{{ dashboard_sort_dir }}">
-            <label class="marking-auto-toggle">
-              <input type="checkbox" name="unmarked" value="1" {% if show_only_unmarked %}checked{% endif %} onchange="this.form.submit()">
-              Show only unmarked
+            <label class="marking-auto-toggle marking-icon-toggle" title="Show only unmarked">
+              <input type="checkbox" name="unmarked" value="1" aria-label="Show only unmarked" {% if show_only_unmarked %}checked{% endif %} onchange="this.form.submit()">
+              <svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#filter"></use></svg>
             </label>
           </form>
+
+          {% if view_mode == 'student' %}
+            {% if next_submission_id %}
+              <a class="marking-nav-link marking-nav-icon" data-nav-role="next" title="Next submission (N)" aria-label="Next submission, keyboard shortcut N" href="{{ url_for('admin_submission_marking', submission_id=next_submission_id, view='student', unmarked=('1' if show_only_unmarked else None), q=dashboard_search or None, marking=dashboard_marking_filter, sort=dashboard_sort_key, dir=dashboard_sort_dir) }}"><svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#next"></use></svg></a>
+            {% else %}
+              <span class="marking-nav-disabled marking-nav-icon" title="Next submission (N)" aria-label="Next submission, keyboard shortcut N"><svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#next"></use></svg></span>
+            {% endif %}
+          {% elif view_mode == 'question' and question_entry and not question_all_marked %}
+            {% if question_next_submission_id %}
+              <a class="marking-nav-link marking-nav-icon" data-nav-role="next" title="Next student (N)" aria-label="Next student, keyboard shortcut N" href="{{ url_for('admin_submission_marking', submission_id=question_next_submission_id, view='question', question=selected_question, unmarked=('1' if show_only_unmarked else None), q=dashboard_search or None, marking=dashboard_marking_filter, sort=dashboard_sort_key, dir=dashboard_sort_dir) }}"><svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#next"></use></svg></a>
+            {% else %}
+              <span class="marking-nav-disabled marking-nav-icon" title="Next student (N)" aria-label="Next student, keyboard shortcut N"><svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#next"></use></svg></span>
+            {% endif %}
+          {% endif %}
         </div>
       </div>
 

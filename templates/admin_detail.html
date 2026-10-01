@@ -11,12 +11,12 @@
   <a class="back-link" href="{{ url_for('admin_dashboard') }}">&larr; Back to all submissions</a>
   <h1>Submission #{{ submission.id }}</h1>
   {% if form_version %}<p class="subtitle" style="margin-bottom:12px;">Form version {{ form_version }}</p>{% endif %}
-  <div class="admin-action-row">
-    <span class="action-btn active">Submission overview</span>
-    <a class="action-btn" href="{{ url_for('admin_submission_metadata', submission_id=submission.id) }}">View file metadata</a>
-    <a class="action-btn" href="{{ url_for('admin_submission_marking', submission_id=submission.id) }}">View marking preview</a>
-    <a class="action-btn" href="{{ url_for('admin_submission_analysis', submission_id=submission.id) }}">View AMPL analysis</a>
-    <a class="action-btn" href="{{ url_for('admin_submission_report_pdf', submission_id=submission.id) }}">Download PDF report</a>
+  <div class="admin-action-row admin-submission-actions">
+    <span class="admin-nav-icon active" title="Submission overview" aria-label="Submission overview" aria-current="page"><svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#overview"></use></svg></span>
+    <a class="admin-nav-icon" href="{{ url_for('admin_submission_metadata', submission_id=submission.id) }}" title="View file metadata" aria-label="View file metadata"><svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#metadata"></use></svg></a>
+    <a class="admin-nav-icon" href="{{ url_for('admin_submission_marking', submission_id=submission.id) }}" title="View marking preview" aria-label="View marking preview"><svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#marking"></use></svg></a>
+    <a class="admin-nav-icon" href="{{ url_for('admin_submission_analysis', submission_id=submission.id) }}" title="View AMPL analysis" aria-label="View AMPL analysis"><svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#analysis"></use></svg></a>
+    <a class="admin-nav-icon" href="{{ url_for('admin_submission_report_pdf', submission_id=submission.id) }}" title="Download PDF report" aria-label="Download PDF report"><svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#report"></use></svg></a>
   </div>
   <form method="POST" action="{{ url_for('admin_delete_submission', submission_id=submission.id) }}" onsubmit="return confirm('Delete this submission and all stored files? This cannot be undone.');">
     <button type="submit" class="danger">Delete submission</button>

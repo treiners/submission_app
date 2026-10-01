@@ -14,11 +14,11 @@
     Submission #{{ submission.id }} &middot; {{ submission.name }}
     {% if form_version %}&middot; Form version {{ form_version }}{% endif %}
   </p>
-  <div class="admin-action-row">
-    <a class="action-btn" href="{{ url_for('admin_submission_detail', submission_id=submission.id) }}">Submission overview</a>
-    <a class="action-btn" href="{{ url_for('admin_submission_metadata', submission_id=submission.id) }}">View file metadata</a>
-    <a class="action-btn" href="{{ url_for('admin_submission_marking', submission_id=submission.id) }}">View marking preview</a>
-    <span class="action-btn active">View AMPL analysis</span>
+  <div class="admin-action-row admin-submission-actions">
+    <a class="admin-nav-icon" href="{{ url_for('admin_submission_detail', submission_id=submission.id) }}" title="Submission overview" aria-label="Submission overview"><svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#overview"></use></svg></a>
+    <a class="admin-nav-icon" href="{{ url_for('admin_submission_metadata', submission_id=submission.id) }}" title="View file metadata" aria-label="View file metadata"><svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#metadata"></use></svg></a>
+    <a class="admin-nav-icon" href="{{ url_for('admin_submission_marking', submission_id=submission.id) }}" title="View marking preview" aria-label="View marking preview"><svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#marking"></use></svg></a>
+    <span class="admin-nav-icon active" title="View AMPL analysis" aria-label="View AMPL analysis" aria-current="page"><svg aria-hidden="true"><use href="{{ url_for('static', filename='icons.svg') }}#analysis"></use></svg></span>
   </div>
 
   {% with messages = get_flashed_messages() %}

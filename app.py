@@ -14,7 +14,7 @@ import zipfile
 from io import BytesIO
 from functools import wraps
 from pathlib import Path
-from urllib import error as urlerror, request as urlrequest
+from urllib import error as urlerror
 
 from dotenv import load_dotenv
 from flask import (
@@ -31,6 +31,7 @@ from src import (
     analysis_display,
     metadata,
     metadata_display,
+    marking_service,
     pdf_report,
     preview_conversion,
     submission_paths,
@@ -140,22 +141,7 @@ ACTIVE_TEMPLATE_JSON_PATH = PROJECT_ROOT / "marking_template" / "test_case" / "a
 
 
 def _normalize_question_id(value):
-    raw = str(value or "").strip().upper()
-    if not raw:
-        return None
-
-    if raw.startswith("Q"):
-        digits = raw[1:]
-    else:
-        digits = raw
-
-    if not digits.isdigit():
-        return None
-
-    number = int(digits)
-    if number <= 0:
-        return None
-    return f"Q{number}"
+    return marking_service.normalize_question_id(value)
 
 
 def _normalize_area_question_targets(area):
@@ -200,14 +186,7 @@ AREA_QUESTION_MAP = _build_area_question_map(SUBMISSION_CONFIG)
 
 
 def _question_sort_key(question_id):
-    parts = re.split(r"(\d+)", str(question_id or ""))
-    normalized = []
-    for part in parts:
-        if part.isdigit():
-            normalized.append((0, int(part)))
-        else:
-            normalized.append((1, part.lower()))
-    return normalized
+    return marking_service.question_sort_key(question_id)
 
 
 def _format_marks_label(max_score):
@@ -1133,131 +1112,16 @@ def _extract_marking_preview_for_submission_file(submission_record, file_record)
     return True
 
 
-def _extract_json_object(text):
-    text = (text or "").strip()
-    if not text:
-        return None
-
-    try:
-        parsed = json.loads(text)
-        if isinstance(parsed, dict):
-            return parsed
-    except json.JSONDecodeError:
-        pass
-
-    start = text.find("{")
-    if start == -1:
-        return None
-
-    depth = 0
-    in_string = False
-    escaped = False
-    for idx in range(start, len(text)):
-        char = text[idx]
-        if in_string:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == '"':
-                in_string = False
-            continue
-
-        if char == '"':
-            in_string = True
-        elif char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                candidate = text[start:idx + 1]
-                try:
-                    parsed = json.loads(candidate)
-                    return parsed if isinstance(parsed, dict) else None
-                except json.JSONDecodeError:
-                    return None
-    return None
-
-
-def _parse_max_score_from_marks_label(marks_label):
-    match = re.search(r"(\d+)", marks_label or "")
-    if match:
-        try:
-            return float(match.group(1))
-        except ValueError:
-            return 5.0
-    return 5.0
-
-
-def _build_marking_ai_prompt(question_id, prompt, answer, marks_label):
-    max_score = _parse_max_score_from_marks_label(marks_label)
-    return (
-        "You are helping an academic marker draft a provisional mark. "
-        "Return strict JSON only and no markdown. "
-        "Required keys: score, feedback_comment, rationale, minimum_requirements_met, strengths, gaps. "
-        "score must be numeric in [0, max_score]. "
-        "minimum_requirements_met must be true or false. "
-        "strengths and gaps must be short string arrays.\n\n"
-        f"Question ID: {question_id}\n"
-        f"Question prompt: {prompt}\n"
-        f"Student answer: {answer}\n"
-        f"Mark label: {marks_label or 'n/a'}\n"
-        f"max_score: {max_score}\n"
-    )
-
-
 def _generate_ai_marking_suggestion(question_id, prompt, answer, marks_label):
-    max_score = _parse_max_score_from_marks_label(marks_label)
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": _build_marking_ai_prompt(question_id, prompt, answer, marks_label),
-        "stream": False,
-        "options": {
-            "temperature": 0.1,
-        },
-    }
-
-    endpoint = OLLAMA_ENDPOINT.rstrip("/") + "/api/generate"
-    req = urlrequest.Request(
-        endpoint,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
+    return marking_service.generate_ai_marking_suggestion(
+        question_id,
+        prompt,
+        answer,
+        marks_label,
+        endpoint=OLLAMA_ENDPOINT,
+        model=OLLAMA_MODEL,
+        timeout_seconds=_runtime_int("ollama_timeout_seconds", "OLLAMA_TIMEOUT_SECONDS", 90),
     )
-    timeout_seconds = _runtime_int("ollama_timeout_seconds", "OLLAMA_TIMEOUT_SECONDS", 90)
-
-    with urlrequest.urlopen(req, timeout=timeout_seconds) as resp:
-        body = json.loads(resp.read().decode("utf-8"))
-
-    raw_text = str(body.get("response", "")).strip()
-    parsed = _extract_json_object(raw_text)
-    if not parsed:
-        return {
-            "ok": False,
-            "error": "Model output was not valid JSON.",
-            "raw_response": raw_text,
-        }
-
-    score = parsed.get("score")
-    try:
-        numeric_score = float(score)
-    except (TypeError, ValueError):
-        numeric_score = None
-
-    if numeric_score is not None:
-        numeric_score = max(0.0, min(max_score, numeric_score))
-
-    suggestion = {
-        "score": numeric_score,
-        "feedback_comment": str(parsed.get("feedback_comment", "")).strip(),
-        "rationale": str(parsed.get("rationale", "")).strip(),
-        "minimum_requirements_met": bool(parsed.get("minimum_requirements_met", False)),
-        "strengths": parsed.get("strengths", []) if isinstance(parsed.get("strengths", []), list) else [],
-        "gaps": parsed.get("gaps", []) if isinstance(parsed.get("gaps", []), list) else [],
-        "max_score": max_score,
-        "model": OLLAMA_MODEL,
-    }
-    return {"ok": True, "suggestion": suggestion, "raw_response": raw_text}
 
 
 @app.context_processor
@@ -1677,6 +1541,31 @@ def admin_dashboard():
     )
 
 
+@app.route("/admin/settings")
+@login_required
+def admin_settings():
+    context = _build_active_template_admin_context()
+    context["assignment_title"] = SUBMISSION_CONFIG["assignment_title"]
+    context["template_upload_errors"] = []
+    return render_template("admin_settings.html", **context)
+
+
+def _build_active_template_admin_context():
+    active_template_context = _load_active_template_questions()
+    return {
+        "active_template_docx_exists": ACTIVE_TEMPLATE_DOCX_PATH.exists(),
+        "active_template_json_exists": ACTIVE_TEMPLATE_JSON_PATH.exists(),
+        "active_template_docx_name": ACTIVE_TEMPLATE_DOCX_PATH.name,
+        "active_template_json_name": ACTIVE_TEMPLATE_JSON_PATH.name,
+        "active_template_question_count": len(active_template_context["question_ids"]),
+        "active_template_status": active_template_context["status"],
+        "active_template_warning": active_template_context["warning"],
+        "active_template_total_max_score": active_template_context.get("total_max_score"),
+        "active_template_total_max_score_is_default": active_template_context.get("total_max_score_is_default", True),
+        "active_template_final_mark_max": active_template_context.get("final_mark_max"),
+    }
+
+
 def _build_dashboard_context(search="", marking_filter="all", sort_key="submitted_at", sort_dir="desc"):
     marking_filter = str(marking_filter or "all").strip().lower()
     if marking_filter not in {"all", "included", "excluded"}:
@@ -1703,9 +1592,9 @@ def _build_dashboard_context(search="", marking_filter="all", sort_key="submitte
 
     submissions = db.list_submissions(search=search or None, marking_filter=marking_filter)
 
-    active_template_context = _load_active_template_questions()
-    template_total_max_score = active_template_context.get("total_max_score")
-    template_final_mark_max = active_template_context.get("final_mark_max")
+    active_template_admin_context = _build_active_template_admin_context()
+    template_total_max_score = active_template_admin_context["active_template_total_max_score"]
+    template_final_mark_max = active_template_admin_context["active_template_final_mark_max"]
 
     for submission in submissions:
         progress = _submission_marking_progress(submission, template_total_max_score, template_final_mark_max)
@@ -1764,16 +1653,7 @@ def _build_dashboard_context(search="", marking_filter="all", sort_key="submitte
         "excluded_count": excluded_count,
         "assignment_title": SUBMISSION_CONFIG["assignment_title"],
         "form_version": SUBMISSION_CONFIG.get("form_version"),
-        "active_template_docx_exists": ACTIVE_TEMPLATE_DOCX_PATH.exists(),
-        "active_template_json_exists": ACTIVE_TEMPLATE_JSON_PATH.exists(),
-        "active_template_docx_name": ACTIVE_TEMPLATE_DOCX_PATH.name,
-        "active_template_json_name": ACTIVE_TEMPLATE_JSON_PATH.name,
-        "active_template_question_count": len(active_template_context["question_ids"]),
-        "active_template_status": active_template_context["status"],
-        "active_template_warning": active_template_context["warning"],
-        "active_template_total_max_score": template_total_max_score,
-        "active_template_total_max_score_is_default": active_template_context.get("total_max_score_is_default", True),
-        "active_template_final_mark_max": template_final_mark_max,
+        **active_template_admin_context,
     }
 
 
@@ -1786,6 +1666,13 @@ def _render_admin_dashboard(search="", marking_filter="all", sort_key="submitted
     )
     context["template_upload_errors"] = template_upload_errors or []
     return render_template("admin_dashboard.html", **context), status_code
+
+
+def _render_admin_settings(template_upload_errors=None, status_code=200):
+    context = _build_active_template_admin_context()
+    context["assignment_title"] = SUBMISSION_CONFIG["assignment_title"]
+    context["template_upload_errors"] = template_upload_errors or []
+    return render_template("admin_settings.html", **context), status_code
 
 
 @app.route("/admin/template/upload", methods=["POST"])
@@ -1802,7 +1689,7 @@ def admin_template_upload():
             errors.append("Template upload only accepts .docx files.")
 
     if errors:
-        return _render_admin_dashboard(template_upload_errors=errors, status_code=400)
+        return _render_admin_settings(template_upload_errors=errors, status_code=400)
 
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1812,7 +1699,7 @@ def admin_template_upload():
             template_payload = metadata.build_active_template_case_file(candidate)
             marker_errors = template_payload.get("errors", [])
             if marker_errors:
-                return _render_admin_dashboard(
+                return _render_admin_settings(
                     template_upload_errors=["Template validation failed:", *marker_errors],
                     status_code=400,
                 )
@@ -1823,7 +1710,7 @@ def admin_template_upload():
             shutil.copy2(candidate, ACTIVE_TEMPLATE_DOCX_PATH)
             metadata.write_metadata(ACTIVE_TEMPLATE_JSON_PATH, template_payload)
     except (OSError, metadata.zipfile.BadZipFile, metadata.ElementTree.ParseError) as error:
-        return _render_admin_dashboard(
+        return _render_admin_settings(
             template_upload_errors=[
                 "Template upload failed while reading the DOCX.",
                 str(error),
@@ -1835,7 +1722,7 @@ def admin_template_upload():
         f"Template uploaded: {uploaded.filename}. "
         f"Saved as {ACTIVE_TEMPLATE_DOCX_PATH.name} and generated {ACTIVE_TEMPLATE_JSON_PATH.name}."
     )
-    return redirect(url_for("admin_dashboard"))
+    return redirect(url_for("admin_settings"))
 
 
 @app.route("/admin/template/total-max-score", methods=["POST"])
@@ -1843,14 +1730,14 @@ def admin_template_upload():
 def admin_update_template_total_max_score():
     if not ACTIVE_TEMPLATE_JSON_PATH.exists():
         flash("Upload an active marking template before setting a total max score.")
-        return redirect(url_for("admin_dashboard"))
+        return redirect(url_for("admin_settings"))
 
     raw_value = request.form.get("total_max_score", "").strip()
     try:
         payload = json.loads(ACTIVE_TEMPLATE_JSON_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         flash(f"Could not read active template JSON: {error}")
-        return redirect(url_for("admin_dashboard"))
+        return redirect(url_for("admin_settings"))
 
     if not raw_value:
         payload.pop("total_max_score", None)
@@ -1861,10 +1748,10 @@ def admin_update_template_total_max_score():
             flash(f"Total max score set to {raw_value}.")
         except ValueError:
             flash(f"'{raw_value}' is not a valid number for total max score.")
-            return redirect(url_for("admin_dashboard"))
+            return redirect(url_for("admin_settings"))
 
     metadata.write_metadata(ACTIVE_TEMPLATE_JSON_PATH, payload)
-    return redirect(url_for("admin_dashboard"))
+    return redirect(url_for("admin_settings"))
 
 
 @app.route("/admin/template/final-mark-max", methods=["POST"])
@@ -1872,14 +1759,14 @@ def admin_update_template_total_max_score():
 def admin_update_template_final_mark_max():
     if not ACTIVE_TEMPLATE_JSON_PATH.exists():
         flash("Upload an active marking template before setting a final mark scale.")
-        return redirect(url_for("admin_dashboard"))
+        return redirect(url_for("admin_settings"))
 
     raw_value = request.form.get("final_mark_max", "").strip()
     try:
         payload = json.loads(ACTIVE_TEMPLATE_JSON_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         flash(f"Could not read active template JSON: {error}")
-        return redirect(url_for("admin_dashboard"))
+        return redirect(url_for("admin_settings"))
 
     if not raw_value:
         payload.pop("final_mark_max", None)
@@ -1890,10 +1777,10 @@ def admin_update_template_final_mark_max():
             flash(f"Final mark will be scaled out of {raw_value}.")
         except ValueError:
             flash(f"'{raw_value}' is not a valid number for the final mark scale.")
-            return redirect(url_for("admin_dashboard"))
+            return redirect(url_for("admin_settings"))
 
     metadata.write_metadata(ACTIVE_TEMPLATE_JSON_PATH, payload)
-    return redirect(url_for("admin_dashboard"))
+    return redirect(url_for("admin_settings"))
 
 
 @app.route("/admin/submission/<int:submission_id>/marking-eligibility", methods=["POST"])
@@ -2235,10 +2122,11 @@ def admin_export_all_reports_zip():
 @app.route("/admin/submissions/delete-all", methods=["POST"])
 @login_required
 def admin_delete_all_submissions():
+    return_to_settings = request.form.get("return_to") == "settings"
     confirmation = request.form.get("confirmation", "").strip()
     if confirmation != "DELETE ALL":
         flash("Delete-all cancelled: type DELETE ALL to confirm.")
-        return redirect(url_for("admin_dashboard"))
+        return redirect(url_for("admin_settings" if return_to_settings else "admin_dashboard"))
 
     upload_root = Path(STORAGE_ENV["LOCAL_UPLOAD_ROOT"]).resolve()
     db.delete_all_submissions(reset_ids=True)
@@ -2254,7 +2142,7 @@ def admin_delete_all_submissions():
                 continue
 
     flash("All submissions were deleted and numbering was reset.")
-    return redirect(url_for("admin_dashboard"))
+    return redirect(url_for("admin_settings" if return_to_settings else "admin_dashboard"))
 
 
 @app.route("/admin/submission/<int:submission_id>")
@@ -2500,6 +2388,9 @@ def admin_generate_all_reports():
     else:
         flash(f"Generated {generated_count} report(s) for all submissions, overwriting any existing reports.")
 
+    if request.form.get("return_to") == "settings":
+        return redirect(url_for("admin_settings"))
+
     return redirect(
         url_for(
             "admin_dashboard",
@@ -2543,6 +2434,9 @@ def admin_rerun_analysis_all_submissions():
             f"{submissions_with_runs} submission(s), {total_runs} run file(s), "
             f"{failures} failed, {timeouts} timed out."
         )
+
+    if request.form.get("return_to") == "settings":
+        return redirect(url_for("admin_settings"))
 
     return redirect(
         url_for(
@@ -2694,116 +2588,23 @@ def admin_submission_marking(submission_id):
     dashboard_sort_key = request.args.get("sort", "submitted_at").strip().lower()
     dashboard_sort_dir = request.args.get("dir", "desc").strip().lower()
 
-    def assessment_has_marking(assessment_record):
-        if not assessment_record:
-            return False
-        score = str(assessment_record.get("score", "") or "").strip()
-        comment = str(assessment_record.get("comment", "") or "").strip()
-        return bool(score and comment)
-
     active_template_context = _load_active_template_questions()
     template_questions = active_template_context["questions"]
     template_question_ids = active_template_context["question_ids"]
     template_question_map = {item["question_id"]: item for item in template_questions}
 
-    def extract_answers_by_question(previews):
-        ordered = []
-        seen = set()
-        by_question = {}
-        for preview in previews:
-            for answer in preview["data"].get("answers", []):
-                question_id = _normalize_question_id(answer.get("question_id"))
-                if not question_id:
-                    continue
-
-                answer_copy = dict(answer)
-                answer_copy["question_id"] = question_id
-                answer_copy["template_question_id"] = (
-                    _normalize_question_id(answer_copy.get("template_question_id")) or question_id
-                )
-
-                if question_id not in seen:
-                    seen.add(question_id)
-                    ordered.append(question_id)
-
-                if question_id not in by_question:
-                    by_question[question_id] = {
-                        "preview_file": preview["file"],
-                        "answer": answer_copy,
-                        "images": answer_copy.get("images", []),
-                    }
-
-        return ordered, by_question
-
-    def merge_question_ids(*question_id_lists):
-        merged = []
-        seen = set()
-        extras = []
-        for index, values in enumerate(question_id_lists):
-            for raw in values or []:
-                question_id = _normalize_question_id(raw)
-                if not question_id or question_id in seen:
-                    continue
-                seen.add(question_id)
-                if index == 0:
-                    merged.append(question_id)
-                else:
-                    extras.append(question_id)
-
-        for question_id in sorted(set(extras), key=_question_sort_key):
-            if question_id not in merged:
-                merged.append(question_id)
-        return merged
-
-    def build_answer_entry(question_id, matched):
-        template_meta = template_question_map.get(question_id, {})
-        template_prompt = str(template_meta.get("question_prompt", "") or "").strip()
-        template_marks_label = str(template_meta.get("marks_label", "") or "").strip()
-
-        source_answer = dict((matched or {}).get("answer") or {})
-        extracted_prompt = str(source_answer.get("prompt", "") or "").strip()
-        merged_prompt = extracted_prompt or template_prompt
-
-        answer_entry = {
-            "question_id": question_id,
-            "template_question_id": source_answer.get("template_question_id") or question_id,
-            "prompt": merged_prompt,
-            "template_prompt": template_prompt,
-            "extracted_prompt": extracted_prompt,
-            "marks_label": source_answer.get("marks_label") or template_marks_label,
-            "answer": str(source_answer.get("answer", "") or ""),
-            "answer_paragraphs": source_answer.get("answer_paragraphs") or [],
-            "confidence": source_answer.get("confidence"),
-            "images": source_answer.get("images") or [],
-            "max_score": template_meta.get("max_score"),
-        }
-
-        return {
-            "preview_file": (matched or {}).get("preview_file"),
-            "answer": answer_entry,
-            "images": answer_entry["images"],
-        }
-
-    def has_unmarked_items(previews, assessment_map):
-        extracted_ids, _ = extract_answers_by_question(previews)
-        question_ids = merge_question_ids(template_question_ids, extracted_ids, assessment_map.keys())
-        for question_id in question_ids:
-            if not assessment_has_marking(assessment_map.get(question_id, {})):
-                return True
-        return False
-
     previews = _load_marking_previews(submission)
-    extracted_question_ids, answers_by_question = extract_answers_by_question(previews)
+    extracted_question_ids, answers_by_question = marking_service.extract_answers_by_question(previews)
     assessments = {
         item["question_id"]: item
         for item in db.list_marking_assessments(submission_id)
     }
-    question_ids = merge_question_ids(template_question_ids, extracted_question_ids, assessments.keys())
+    question_ids = marking_service.merge_question_ids(template_question_ids, extracted_question_ids, assessments.keys())
 
     student_question_entries = []
     for question_id in question_ids:
         matched = answers_by_question.get(question_id)
-        answer_block = build_answer_entry(question_id, matched)
+        answer_block = marking_service.build_answer_entry(question_id, matched, template_question_map)
         student_question_entries.append({
             "question_id": question_id,
             "assessment": assessments.get(question_id, {}),
@@ -2839,7 +2640,7 @@ def admin_submission_marking(submission_id):
                 assessment["question_id"]: assessment
                 for assessment in db.list_marking_assessments(full_submission["id"])
             }
-            if has_unmarked_items(full_previews, full_assessments):
+            if marking_service.has_unmarked_items(full_previews, full_assessments, template_question_ids):
                 unmarked_submission_ids.append(full_submission["id"])
 
     if view_mode == "student" and show_only_unmarked and unmarked_submission_ids and submission_id not in unmarked_submission_ids:
@@ -2893,8 +2694,8 @@ def admin_submission_marking(submission_id):
                 for item in db.list_marking_assessments(full_submission["id"])
             }
 
-            full_extracted_ids, full_answers_by_question = extract_answers_by_question(full_previews)
-            full_question_ids = merge_question_ids(
+            full_extracted_ids, full_answers_by_question = marking_service.extract_answers_by_question(full_previews)
+            full_question_ids = marking_service.merge_question_ids(
                 template_question_ids,
                 full_extracted_ids,
                 full_assessments.keys(),
@@ -2904,7 +2705,7 @@ def admin_submission_marking(submission_id):
                 if qid not in all_seen:
                     all_seen.add(qid)
                     all_question_ids.append(qid)
-                if not assessment_has_marking(full_assessments.get(qid, {})):
+                if not marking_service.assessment_has_marking(full_assessments.get(qid, {})):
                     question_has_unmarked[qid] = True
 
             staged.append((full_submission, full_assessments, full_answers_by_question, full_question_ids))
@@ -2925,12 +2726,13 @@ def admin_submission_marking(submission_id):
                 if selected_question not in full_question_ids:
                     continue
                 selected_assessment = full_assessments.get(selected_question, {})
-                if show_only_unmarked and assessment_has_marking(selected_assessment):
+                if show_only_unmarked and marking_service.assessment_has_marking(selected_assessment):
                     continue
                 eval_candidate = db.get_eval_case_candidate(full_submission["id"], selected_question)
-                answer_block = build_answer_entry(
+                answer_block = marking_service.build_answer_entry(
                     selected_question,
                     full_answers_by_question.get(selected_question),
+                    template_question_map,
                 )
                 question_entries.append({
                     "submission_id": full_submission["id"],

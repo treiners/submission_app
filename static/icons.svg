@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg">
+  <symbol id="overview" viewBox="0 0 24 24">
+    <path d="m3 10 9-7 9 7M5 9v12h14V9M9 21v-7h6v7" />
+  </symbol>
+  <symbol id="metadata" viewBox="0 0 24 24">
+    <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h7M13 2v6h6M13 2l6 6M8 13h5M8 17h3" />
+    <circle cx="16.5" cy="16.5" r="3.5" />
+    <path d="m19 19 2 2" />
+  </symbol>
+  <symbol id="marking" viewBox="0 0 24 24">
+    <path d="m4 16.5-.8 4.3 4.3-.8L20 7.5 16.5 4 4 16.5zM14.8 5.7l3.5 3.5" />
+  </symbol>
+  <symbol id="analysis" viewBox="0 0 24 24">
+    <path d="M3 3v18h18M7 15l4-4 3 3 6-7M20 7V4h-3" />
+  </symbol>
+  <symbol id="report" viewBox="0 0 24 24">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 13h8M8 17h5" />
+  </symbol>
+  <symbol id="refresh" viewBox="0 0 24 24">
+    <path d="M20 7v5h-5M4 17v-5h5M5.5 9A7 7 0 0 1 18 6l2 2M4 16l2 2a7 7 0 0 0 12.5-3" />
+  </symbol>
+  <symbol id="previous" viewBox="0 0 24 24">
+    <path d="m15 18-6-6 6-6" />
+  </symbol>
+  <symbol id="next" viewBox="0 0 24 24">
+    <path d="m9 18 6-6-6-6" />
+  </symbol>
+  <symbol id="student" viewBox="0 0 24 24">
+    <circle cx="12" cy="8" r="4" />
+    <path d="M4 21a8 8 0 0 1 16 0" />
+  </symbol>
+  <symbol id="question" viewBox="0 0 24 24">
+    <circle cx="5" cy="6" r="1" />
+    <circle cx="5" cy="12" r="1" />
+    <circle cx="5" cy="18" r="1" />
+    <path d="M10 6h10M10 12h10M10 18h10" />
+  </symbol>
+  <symbol id="sparkles" viewBox="0 0 24 24">
+    <path d="m9 3 1.8 5.2L16 10l-5.2 1.8L9 17l-1.8-5.2L2 10l5.2-1.8L9 3zM19 14l1 3 3 1-3 1-1 3-1-3-3-1 3-1 1-3z" />
+  </symbol>
+  <symbol id="filter" viewBox="0 0 24 24">
+    <path d="M3 4h18l-7 8v6l-4 2v-8L3 4z" />
+  </symbol>
+</svg>

@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Downloads &amp; settings &mdash; Admin</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<div class="page wide settings-page">
+  <div class="topbar">
+    <div>
+      <h1 style="margin-bottom:0;">Downloads &amp; settings</h1>
+      <p class="subtitle" style="margin-bottom:0;">{{ assignment_title }}</p>
+    </div>
+    <div class="admin-topbar-actions">
+      <a class="back-link" href="{{ url_for('admin_dashboard') }}">Back to overview</a>
+      <a class="logout" href="{{ url_for('admin_logout') }}">Log out</a>
+    </div>
+  </div>
+
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      {% for msg in messages %}
+      <div class="flash">{{ msg }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  {% if template_upload_errors %}
+  <div class="flash" role="alert">
+    <strong>Template upload blocked.</strong>
+    <ul style="margin:8px 0 0 18px; padding:0;">
+      {% for err in template_upload_errors %}
+      <li>{{ err }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <section class="settings-section" aria-labelledby="template-heading">
+    <h2 id="template-heading">Marking template</h2>
+    <p class="settings-description">Upload the worksheet template and set how marks are totaled and scaled.</p>
+    <div class="settings-template-status">
+      <strong>Active template</strong>
+      <span>DOCX: {% if active_template_docx_exists %}{{ active_template_docx_name }}{% else %}missing{% endif %}</span>
+      <span>JSON: {% if active_template_json_exists %}{{ active_template_json_name }}{% else %}missing{% endif %}</span>
+      <span>{{ active_template_question_count }} questions</span>
+      <span>Status: {{ active_template_status }}</span>
+    </div>
+    {% if active_template_warning %}
+    <p class="settings-warning">{{ active_template_warning }}</p>
+    {% endif %}
+
+    <form class="settings-upload-form" method="POST" action="{{ url_for('admin_template_upload') }}" enctype="multipart/form-data">
+      <label for="template-docx">Upload worksheet template</label>
+      <input id="template-docx" type="file" name="template_docx" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required>
+      <button type="submit" class="primary">Upload template</button>
+    </form>
+    <p class="settings-help">Required question markers: <strong>[Q1: QUESTION M:6]</strong> ... <strong>[Q1: END]</strong>. Invalid markers block the upload.</p>
+
+    <div class="settings-form-list">
+      <form class="settings-form-row" method="POST" action="{{ url_for('admin_update_template_total_max_score') }}">
+        <label for="total-max-score">Total max score</label>
+        <input class="settings-number-input" id="total-max-score" type="number" step="0.5" name="total_max_score" value="{{ active_template_total_max_score }}">
+        <button type="submit" class="admin-table-btn">Save total</button>
+        <span class="settings-help">{% if active_template_total_max_score_is_default %}Defaults to the sum of question marks.{% else %}Custom total, for example when bonus marks are excluded.{% endif %} Leave blank to reset.</span>
+      </form>
+      <form class="settings-form-row" method="POST" action="{{ url_for('admin_update_template_final_mark_max') }}">
+        <label for="final-mark-max">Final mark out of</label>
+        <input class="settings-number-input" id="final-mark-max" type="number" step="0.1" name="final_mark_max" value="{{ active_template_final_mark_max }}">
+        <button type="submit" class="admin-table-btn">Save scale</button>
+        <span class="settings-help">Rescale the achieved score to this value (for example, 2.5). Leave blank to disable.</span>
+      </form>
+    </div>
+  </section>
+
+  <section class="settings-section" aria-labelledby="downloads-heading">
+    <h2 id="downloads-heading">Downloads</h2>
+    <p class="settings-description">Export marking data or collect generated student reports.</p>
+    <div class="settings-download-grid">
+      <article class="settings-download-item">
+        <h3>Marking overview</h3>
+        <p>Excel workbook for included submissions.</p>
+        <a class="settings-download-link" href="{{ url_for('admin_export_marking_overview_xlsx') }}">Download Excel</a>
+      </article>
+      <article class="settings-download-item">
+        <h3>Marking overview, all</h3>
+        <p>Excel workbook including excluded submissions.</p>
+        <a class="settings-download-link" href="{{ url_for('admin_export_marking_overview_xlsx', include_excluded=1) }}">Download Excel</a>
+      </article>
+      <article class="settings-download-item">
+        <h3>Students in columns</h3>
+        <p>Excel workbook arranged with one student per column.</p>
+        <a class="settings-download-link" href="{{ url_for('admin_export_marking_students_columns_xlsx') }}">Download Excel</a>
+      </article>
+      <article class="settings-download-item">
+        <h3>PDF reports</h3>
+        <p>ZIP archive of reports for included submissions.</p>
+        <a class="settings-download-link" href="{{ url_for('admin_export_all_reports_zip') }}">Download ZIP</a>
+      </article>
+      <article class="settings-download-item">
+        <h3>PDF reports, all</h3>
+        <p>ZIP archive including excluded submissions.</p>
+        <a class="settings-download-link" href="{{ url_for('admin_export_all_reports_zip', include_excluded=1) }}">Download ZIP</a>
+      </article>
+    </div>
+  </section>
+
+  <section class="settings-section" aria-labelledby="maintenance-heading">
+    <h2 id="maintenance-heading">Batch actions</h2>
+    <p class="settings-description">Run maintenance tasks across every submission.</p>
+    <div class="settings-batch-actions">
+      <form method="POST" action="{{ url_for('admin_generate_all_reports') }}" onsubmit="return confirm('Generate PDF reports for all submissions? This will overwrite any existing reports.');">
+        <input type="hidden" name="return_to" value="settings">
+        <div><strong>Generate all PDF reports</strong><span>Rebuild every report and overwrite existing PDFs.</span></div>
+        <button type="submit" class="action-btn">Generate reports</button>
+      </form>
+      <form method="POST" action="{{ url_for('admin_rerun_analysis_all_submissions') }}" onsubmit="return confirm('Rerun AMPL analysis for all submissions?');">
+        <input type="hidden" name="return_to" value="settings">
+        <div><strong>Rerun AMPL analysis</strong><span>Run analysis files for all submissions.</span></div>
+        <button type="submit" class="action-btn">Rerun analysis</button>
+      </form>
+    </div>
+  </section>
+
+  <section class="settings-section settings-danger-zone" aria-labelledby="data-heading">
+    <h2 id="data-heading">Delete all submissions</h2>
+    <p class="settings-description">Permanently delete all submissions and uploaded files. This cannot be undone.</p>
+    <form class="settings-delete-form" method="POST" action="{{ url_for('admin_delete_all_submissions') }}" onsubmit="return confirm('Delete ALL submissions and uploaded files? This cannot be undone.');">
+      <input type="hidden" name="return_to" value="settings">
+      <label class="visually-hidden" for="delete-confirmation">Type DELETE ALL to confirm</label>
+      <input id="delete-confirmation" type="text" name="confirmation" placeholder="Type DELETE ALL to confirm" autocomplete="off">
+      <button type="submit" class="danger">Delete all submissions</button>
+    </form>
+  </section>
+</div>
+</body>
+</html>

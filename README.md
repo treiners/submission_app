@@ -6,14 +6,20 @@ code, and give you an admin page to browse submissions.
 
 ## What's included
 
-- `app.py` — Flask application (routes, validation, submission logic)
-- `db.py` — SQLite schema and queries
-- `storage.py` — storage backends (local / Dropbox / OneDrive), pluggable
-- `email_util.py` — Gmail SMTP confirmation email
+- `app.py` — Flask application setup and route handlers
+- `src/db.py` — SQLite schema and queries
+- `src/storage.py` — pluggable local, Dropbox, and OneDrive storage backends
+- `src/email_util.py` — Gmail SMTP confirmation email
+- `src/marking_service.py` — marking question/answer assembly and AI suggestion logic
+- `src/metadata.py` and `src/metadata_display.py` — extraction and metadata presentation
+- `src/preview_conversion.py` — document and video preview conversion
+- `src/submission_paths.py` and `src/submission_validation.py` — upload path handling and validation
+- `src/analysis_runner.py` and `src/analysis_display.py` — AMPL execution and result presentation
+- `src/report_files.py` and `src/pdf_report.py` — report-file processing and PDF report generation
 - `config.json` — submission rules and non-secret runtime defaults — edit freely
 - `.env.example` — secrets template (copy to `.env`, never commit `.env`)
 - `templates/`, `static/` — the submission form and admin pages
-- `get_dropbox_refresh_token.py` — one-time helper for Dropbox setup
+- `src/get_dropbox_refresh_token.py` — one-time helper for Dropbox setup
 
 ## 1. Local setup
 
@@ -70,7 +76,7 @@ Edit `config.json` — no code changes needed:
 ```json
 {
   "assignment_title": "Assignment 1 Submission",
-  "form_version": "1.6.0",
+  "form_version": "1.6.1",
   "marking_template_docx": "marking_template/marking_template_MATH5007_A1P1_2026_S2.docx",
   "marking_extraction_areas": ["report"],
   "marking_preview_max_images": 12,
