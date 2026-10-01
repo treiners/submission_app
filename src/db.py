@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS submissions (
     marking_excluded INTEGER NOT NULL DEFAULT 0,
     marking_excluded_reason TEXT,
     marking_excluded_at TEXT,
+    general_comment TEXT,
     email TEXT,
     email_sent INTEGER NOT NULL DEFAULT 0,
     storage_backend TEXT NOT NULL,
@@ -121,6 +122,8 @@ def init_db():
         conn.execute("ALTER TABLE submissions ADD COLUMN marking_excluded_reason TEXT")
     if "marking_excluded_at" not in columns:
         conn.execute("ALTER TABLE submissions ADD COLUMN marking_excluded_at TEXT")
+    if "general_comment" not in columns:
+        conn.execute("ALTER TABLE submissions ADD COLUMN general_comment TEXT")
 
     marking_columns = {
         row["name"] for row in conn.execute("PRAGMA table_info(marking_assessments)").fetchall()
@@ -465,6 +468,17 @@ def list_marking_assessments(submission_id):
     ).fetchall()
     conn.close()
     return [dict(row) for row in rows]
+
+
+def save_general_comment(submission_id, comment):
+    """Save a free-text overall comment for a submission (not scored, not AI-assisted)."""
+    conn = get_connection()
+    conn.execute(
+        "UPDATE submissions SET general_comment = ? WHERE id = ?",
+        ((comment or "").strip(), submission_id),
+    )
+    conn.commit()
+    conn.close()
 
 
 def delete_marking_assessment(submission_id, question_id):

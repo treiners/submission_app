@@ -91,12 +91,40 @@
     {% if active_template_warning %}
     <p class="subtitle" style="margin:8px 0 0; color:#7a5a00;">{{ active_template_warning }}</p>
     {% endif %}
+    <form method="POST" action="{{ url_for('admin_update_template_total_max_score') }}" style="margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <label style="font-size:0.85rem;">Total max score
+        <input type="number" step="0.5" name="total_max_score" value="{{ active_template_total_max_score }}" style="width:90px; margin-left:6px;">
+      </label>
+      <button type="submit" class="admin-table-btn">Save total</button>
+      <span class="subtitle" style="margin:0; font-size:0.78rem;">
+        {% if active_template_total_max_score_is_default %}Default: sum of question marks.{% else %}Custom total (differs from the sum of question marks &mdash; e.g. bonus marks excluded).{% endif %}
+        Leave blank to reset to the default.
+      </span>
+    </form>
+    <form method="POST" action="{{ url_for('admin_update_template_final_mark_max') }}" style="margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <label style="font-size:0.85rem;">Final mark out of
+        <input type="number" step="0.1" name="final_mark_max" value="{{ active_template_final_mark_max }}" style="width:90px; margin-left:6px;">
+      </label>
+      <button type="submit" class="admin-table-btn">Save scale</button>
+      <span class="subtitle" style="margin:0; font-size:0.78rem;">
+        Rescales the achieved score to a mark out of this value (e.g. 2.5). Leave blank to disable.
+      </span>
+    </form>
   </div>
 
   <div class="admin-action-row" style="margin-top:0; margin-bottom:10px;">
     <a class="action-btn" href="{{ url_for('admin_export_marking_overview_xlsx') }}">Download marking (Excel, included only)</a>
     <a class="action-btn" href="{{ url_for('admin_export_marking_overview_xlsx', include_excluded=1) }}">Download marking (Excel, include excluded)</a>
     <a class="action-btn" href="{{ url_for('admin_export_marking_students_columns_xlsx') }}">Download marking (Excel, students in columns)</a>
+    <a class="action-btn" href="{{ url_for('admin_export_all_reports_zip') }}">Download all PDF reports (zip, included only)</a>
+    <a class="action-btn" href="{{ url_for('admin_export_all_reports_zip', include_excluded=1) }}">Download all PDF reports (zip, include excluded)</a>
+    <form method="POST" action="{{ url_for('admin_generate_all_reports') }}" onsubmit="return confirm('Generate PDF reports for all submissions? This will overwrite any existing reports.');" style="display:inline-flex;">
+      <input type="hidden" name="q" value="{{ search }}">
+      <input type="hidden" name="marking" value="{{ marking_filter }}">
+      <input type="hidden" name="sort" value="{{ sort_key }}">
+      <input type="hidden" name="dir" value="{{ sort_dir }}">
+      <button type="submit" class="action-btn">Create all reports (overwrite)</button>
+    </form>
     <form method="POST" action="{{ url_for('admin_rerun_analysis_all_submissions') }}" onsubmit="return confirm('Rerun AMPL analysis for all submissions?');" style="display:inline-flex;">
       <input type="hidden" name="q" value="{{ search }}">
       <input type="hidden" name="marking" value="{{ marking_filter }}">
@@ -129,6 +157,8 @@
         <th>{{ sort_header('Code', 'code') }}</th>
         <th>{{ sort_header('Status', 'status') }}</th>
         <th>{{ sort_header('Marking', 'marking') }}</th>
+        <th>Marking progress</th>
+        <th>{{ sort_header('Total marks', 'total_marks') }}</th>
         <th>{{ sort_header('Storage', 'storage_backend') }}</th>
         <th>{{ sort_header('Email', 'email_sent') }}</th>
         <th>{{ sort_header('IP', 'ip_address') }}</th>
@@ -182,6 +212,31 @@
             </form>
           {% endif %}
         </td>
+        <td>
+          {% if s.marking_progress_total %}
+          <div class="marking-progress" title="{{ s.marking_progress_marked }} / {{ s.marking_progress_total }} questions marked">
+            <div class="marking-progress-grid">
+              {% for cell in s.marking_progress_cells %}
+              <span class="marking-progress-cell {{ 'marked' if cell.marked else 'unmarked' }}" title="{{ cell.question_id }}: {{ 'marked' if cell.marked else 'not marked' }}"></span>
+              {% endfor %}
+            </div>
+            <span class="marking-progress-label">{{ s.marking_progress_marked }}/{{ s.marking_progress_total }}</span>
+          </div>
+          {% else %}
+            <span style="font-size:0.78rem; color:var(--ink-soft);">no questions</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if s.total_max %}
+          <div><strong>{{ s.total_score | round(1) }}</strong> / {{ s.total_max | round(1) }}</div>
+          <div style="font-size:0.78rem; color:var(--ink-soft);">{{ s.total_percentage }}%</div>
+          {% if s.final_mark is not none %}
+          <div style="font-size:0.78rem; color:var(--ink-soft);">Final: <strong>{{ s.final_mark | round(2) }}</strong> / {{ s.final_mark_max | round(2) }}</div>
+          {% endif %}
+          {% else %}
+            <span style="font-size:0.78rem; color:var(--ink-soft);">n/a</span>
+          {% endif %}
+        </td>
         <td>{{ s.storage_backend }}</td>
         <td>
           {% if s.email_sent %}
@@ -195,6 +250,7 @@
           <div class="admin-table-actions">
             <a class="admin-table-btn" href="{{ url_for('admin_submission_detail', submission_id=s.id) }}">View</a>
             <a class="admin-table-btn" href="{{ url_for('admin_submission_metadata', submission_id=s.id) }}">Metadata</a>
+            <a class="admin-table-btn" href="{{ url_for('admin_submission_report_pdf', submission_id=s.id) }}">PDF report</a>
             <form method="POST" action="{{ url_for('admin_run_submission_analysis', submission_id=s.id) }}" onsubmit="return confirm('Run all .run files for this submission?');" style="display:inline-flex;">
               <input type="hidden" name="return_to" value="dashboard">
               <input type="hidden" name="q" value="{{ search }}">
@@ -210,7 +266,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="10" style="color:var(--ink-soft);">No submissions found.</td></tr>
+      <tr><td colspan="12" style="color:var(--ink-soft);">No submissions found.</td></tr>
       {% endfor %}
     </tbody>
   </table>

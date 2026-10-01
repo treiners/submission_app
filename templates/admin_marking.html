@@ -280,6 +280,28 @@
   {% else %}
   <div class="card">No marking preview output was found for this submission.</div>
   {% endif %}
+
+  {% if student_question_entries or student_all_marked %}
+  <div class="card metadata-card question-card">
+    <h3>General comment</h3>
+    <p class="subtitle" style="margin:0 0 10px; font-size:0.82rem;">
+      Overall feedback for this student. Not scored and not included in the total &mdash; shown at the end of the PDF report.
+    </p>
+    <form method="POST" action="{{ url_for('admin_save_general_comment', submission_id=submission.id) }}" class="assessment-form">
+      <input type="hidden" name="view" value="student">
+      <input type="hidden" name="q" value="{{ dashboard_search }}">
+      <input type="hidden" name="marking" value="{{ dashboard_marking_filter }}">
+      <input type="hidden" name="sort" value="{{ dashboard_sort_key }}">
+      <input type="hidden" name="dir" value="{{ dashboard_sort_dir }}">
+      <label>Comment
+        <textarea name="general_comment" rows="4" class="autosize" placeholder="Overall feedback for this student">{{ submission.general_comment or '' }}</textarea>
+      </label>
+      <div class="assessment-actions">
+        <button type="submit" class="primary save-marking-btn">Save general comment</button>
+      </div>
+    </form>
+  </div>
+  {% endif %}
   {% else %}
   <div class="card metadata-card question-card">
     <h2>Question view</h2>

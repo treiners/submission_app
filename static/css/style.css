@@ -528,6 +528,39 @@ table.admin-table a { color: var(--accent); text-decoration: none; font-weight: 
   background: rgba(40, 86, 163, 0.05);
 }
 
+.marking-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.marking-progress-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 10px);
+  gap: 3px;
+  max-width: 100px;
+}
+
+.marking-progress-cell {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: rgba(179, 38, 30, 0.18);
+  border: 1px solid rgba(179, 38, 30, 0.3);
+}
+
+.marking-progress-cell.marked {
+  background: var(--good);
+  border-color: var(--good);
+}
+
+.marking-progress-label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
 .search-bar {
   display: flex;
   gap: 10px;

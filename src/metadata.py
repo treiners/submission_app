@@ -946,6 +946,7 @@ def build_active_template_case_file(template_docx):
             "question_count": len(questions),
         },
         "questions": questions,
+        "total_max_score": sum(question["max_score"] for question in questions),
         "cases": cases,
         "errors": parsed["errors"],
     }

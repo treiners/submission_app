@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import shlex
+import zipfile
 from io import BytesIO
 from functools import wraps
 from pathlib import Path
@@ -30,6 +31,7 @@ from src import (
     analysis_display,
     metadata,
     metadata_display,
+    pdf_report,
     preview_conversion,
     submission_paths,
 )
@@ -226,6 +228,9 @@ def _load_active_template_questions():
         "warning": "",
         "questions": [],
         "question_ids": [],
+        "total_max_score": None,
+        "total_max_score_is_default": True,
+        "final_mark_max": None,
         "source_docx_exists": ACTIVE_TEMPLATE_DOCX_PATH.exists(),
         "source_json_exists": ACTIVE_TEMPLATE_JSON_PATH.exists(),
     }
@@ -300,6 +305,27 @@ def _load_active_template_questions():
     normalized = sorted(normalized, key=lambda item: _question_sort_key(item["question_id"]))
     context["questions"] = normalized
     context["question_ids"] = [item["question_id"] for item in normalized]
+
+    default_total = sum(item["max_score"] or 0 for item in normalized)
+    total_max_score_raw = payload.get("total_max_score")
+    if total_max_score_raw in (None, ""):
+        context["total_max_score"] = default_total
+        context["total_max_score_is_default"] = True
+    else:
+        try:
+            context["total_max_score"] = float(total_max_score_raw)
+            context["total_max_score_is_default"] = False
+        except (TypeError, ValueError):
+            errors.append(f"Invalid total_max_score '{total_max_score_raw}'; falling back to the sum of question marks.")
+            context["total_max_score"] = default_total
+            context["total_max_score_is_default"] = True
+
+    final_mark_max_raw = payload.get("final_mark_max")
+    if final_mark_max_raw not in (None, ""):
+        try:
+            context["final_mark_max"] = float(final_mark_max_raw)
+        except (TypeError, ValueError):
+            errors.append(f"Invalid final_mark_max '{final_mark_max_raw}'; final mark scaling is disabled.")
 
     if errors:
         context["status"] = "partial"
@@ -970,6 +996,124 @@ def _load_marking_previews(submission_record):
     return previews
 
 
+def _build_report_question_entries(submission):
+    """Build per-question entries (prompt/score/feedback/source) for the PDF report."""
+    template_question_map = {
+        item["question_id"]: item for item in _load_active_template_questions()["questions"]
+    }
+
+    previews = _load_marking_previews(submission)
+    answers_by_question = {}
+    for preview in previews:
+        for answer in preview["data"].get("answers", []):
+            question_id = _normalize_question_id(answer.get("question_id"))
+            if question_id and question_id not in answers_by_question:
+                answers_by_question[question_id] = answer
+
+    assessments = {
+        item["question_id"]: item
+        for item in db.list_marking_assessments(submission["id"])
+        if item.get("question_id")
+    }
+
+    question_ids = set(template_question_map) | set(answers_by_question) | set(assessments)
+
+    entries = []
+    for question_id in sorted(question_ids, key=_question_sort_key):
+        template_meta = template_question_map.get(question_id, {})
+        answer = answers_by_question.get(question_id, {})
+        assessment = assessments.get(question_id, {})
+
+        max_score = template_meta.get("max_score")
+        raw_score = str(assessment.get("score", "") or "").strip()
+        numeric_score = pdf_report.parse_numeric_score(raw_score)
+        numeric_score = None if numeric_score is None else max(0.0, min(numeric_score, max_score) if max_score else numeric_score)
+
+        entries.append({
+            "question_id": question_id,
+            "prompt": str(answer.get("prompt", "") or template_meta.get("question_prompt", "") or "").strip(),
+            "max_score": max_score,
+            "score": raw_score,
+            "numeric_score": numeric_score,
+            "percentage": pdf_report.compute_question_percentage(numeric_score, max_score),
+            "comment": assessment.get("comment", ""),
+            "comment_source": assessment.get("comment_source", "human"),
+            "ai_reasoning": assessment.get("ai_reasoning", ""),
+        })
+
+    return entries
+
+
+def _submission_report_filename(submission):
+    student_id = str(submission.get("student_id", "") or "unknown_student").strip()
+    name = secure_filename(str(submission.get("name", "") or "student")) or "student"
+    return f"{student_id}_{name}.pdf"
+
+
+def _submission_marking_progress(submission_summary, template_total_max_score=None, template_final_mark_max=None):
+    """Return per-question marked/unmarked cells plus total marks for the dashboard."""
+    submission = db.get_submission(submission_summary["id"])
+    if not submission:
+        return {
+            "cells": [],
+            "marked_count": 0,
+            "total_count": 0,
+            "total_score": 0.0,
+            "total_max": 0.0,
+            "percentage": None,
+            "final_mark": None,
+            "final_mark_max": None,
+        }
+
+    entries = _build_report_question_entries(submission)
+    cells = []
+    marked_count = 0
+    for entry in entries:
+        marked = bool(str(entry.get("score") or "").strip()) and bool(str(entry.get("comment") or "").strip())
+        if marked:
+            marked_count += 1
+        cells.append({"question_id": entry["question_id"], "marked": marked})
+
+    totals = pdf_report.compute_totals(
+        entries, total_max_override=template_total_max_score, final_mark_max=template_final_mark_max
+    )
+
+    return {
+        "cells": cells,
+        "marked_count": marked_count,
+        "total_count": len(entries),
+        "total_score": totals["total_score"],
+        "total_max": totals["total_max"],
+        "percentage": totals["percentage"],
+        "final_mark": totals["final_mark"],
+        "final_mark_max": totals["final_mark_max"],
+    }
+
+
+def _reports_directory():
+    reports_dir = Path(STORAGE_ENV["LOCAL_UPLOAD_ROOT"]).resolve() / "_reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    return reports_dir
+
+
+def _generate_and_store_submission_report(submission):
+    """Build the PDF report for a submission and save it under uploads/_reports."""
+    entries = _build_report_question_entries(submission)
+    template_context = _load_active_template_questions()
+    template_total_max_score = template_context.get("total_max_score")
+    template_final_mark_max = template_context.get("final_mark_max")
+    pdf_bytes = pdf_report.build_submission_report(
+        submission,
+        entries,
+        SUBMISSION_CONFIG.get("assignment_title"),
+        total_max_override=template_total_max_score,
+        final_mark_max=template_final_mark_max,
+    )
+    save_path = _reports_directory() / _submission_report_filename(submission)
+    save_path.write_bytes(pdf_bytes)
+    return pdf_bytes, save_path
+
+
 def _extract_marking_preview_for_submission_file(submission_record, file_record):
     metadata_folder = _submission_metadata_folder(submission_record)
     if not metadata_folder:
@@ -1549,6 +1693,7 @@ def _build_dashboard_context(search="", marking_filter="all", sort_key="submitte
         "storage_backend",
         "email_sent",
         "ip_address",
+        "total_marks",
     }:
         sort_key = "submitted_at"
 
@@ -1557,6 +1702,21 @@ def _build_dashboard_context(search="", marking_filter="all", sort_key="submitte
         sort_dir = "desc"
 
     submissions = db.list_submissions(search=search or None, marking_filter=marking_filter)
+
+    active_template_context = _load_active_template_questions()
+    template_total_max_score = active_template_context.get("total_max_score")
+    template_final_mark_max = active_template_context.get("final_mark_max")
+
+    for submission in submissions:
+        progress = _submission_marking_progress(submission, template_total_max_score, template_final_mark_max)
+        submission["marking_progress_cells"] = progress["cells"]
+        submission["marking_progress_marked"] = progress["marked_count"]
+        submission["marking_progress_total"] = progress["total_count"]
+        submission["total_score"] = progress["total_score"]
+        submission["total_max"] = progress["total_max"]
+        submission["total_percentage"] = progress["percentage"]
+        submission["final_mark"] = progress["final_mark"]
+        submission["final_mark_max"] = progress["final_mark_max"]
 
     status_order = {
         "completed": 0,
@@ -1584,14 +1744,15 @@ def _build_dashboard_context(search="", marking_filter="all", sort_key="submitte
             return (1 if submission.get("email_sent") else 0, submission.get("submitted_at") or "")
         if sort_key == "ip_address":
             return (submission.get("ip_address") or "").lower()
+        if sort_key == "total_marks":
+            percentage = submission.get("total_percentage")
+            return (-1, 0.0) if percentage is None else (0, percentage)
         return submission.get("submitted_at") or ""
 
     submissions = sorted(submissions, key=dashboard_sort_value, reverse=(sort_dir == "desc"))
 
     included_count = len(db.list_submissions(marking_filter="included"))
     excluded_count = len(db.list_submissions(marking_filter="excluded"))
-
-    active_template_context = _load_active_template_questions()
 
     return {
         "submissions": submissions,
@@ -1610,6 +1771,9 @@ def _build_dashboard_context(search="", marking_filter="all", sort_key="submitte
         "active_template_question_count": len(active_template_context["question_ids"]),
         "active_template_status": active_template_context["status"],
         "active_template_warning": active_template_context["warning"],
+        "active_template_total_max_score": template_total_max_score,
+        "active_template_total_max_score_is_default": active_template_context.get("total_max_score_is_default", True),
+        "active_template_final_mark_max": template_final_mark_max,
     }
 
 
@@ -1671,6 +1835,64 @@ def admin_template_upload():
         f"Template uploaded: {uploaded.filename}. "
         f"Saved as {ACTIVE_TEMPLATE_DOCX_PATH.name} and generated {ACTIVE_TEMPLATE_JSON_PATH.name}."
     )
+    return redirect(url_for("admin_dashboard"))
+
+
+@app.route("/admin/template/total-max-score", methods=["POST"])
+@login_required
+def admin_update_template_total_max_score():
+    if not ACTIVE_TEMPLATE_JSON_PATH.exists():
+        flash("Upload an active marking template before setting a total max score.")
+        return redirect(url_for("admin_dashboard"))
+
+    raw_value = request.form.get("total_max_score", "").strip()
+    try:
+        payload = json.loads(ACTIVE_TEMPLATE_JSON_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        flash(f"Could not read active template JSON: {error}")
+        return redirect(url_for("admin_dashboard"))
+
+    if not raw_value:
+        payload.pop("total_max_score", None)
+        flash("Total max score reset to the default (sum of question marks).")
+    else:
+        try:
+            payload["total_max_score"] = float(raw_value)
+            flash(f"Total max score set to {raw_value}.")
+        except ValueError:
+            flash(f"'{raw_value}' is not a valid number for total max score.")
+            return redirect(url_for("admin_dashboard"))
+
+    metadata.write_metadata(ACTIVE_TEMPLATE_JSON_PATH, payload)
+    return redirect(url_for("admin_dashboard"))
+
+
+@app.route("/admin/template/final-mark-max", methods=["POST"])
+@login_required
+def admin_update_template_final_mark_max():
+    if not ACTIVE_TEMPLATE_JSON_PATH.exists():
+        flash("Upload an active marking template before setting a final mark scale.")
+        return redirect(url_for("admin_dashboard"))
+
+    raw_value = request.form.get("final_mark_max", "").strip()
+    try:
+        payload = json.loads(ACTIVE_TEMPLATE_JSON_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        flash(f"Could not read active template JSON: {error}")
+        return redirect(url_for("admin_dashboard"))
+
+    if not raw_value:
+        payload.pop("final_mark_max", None)
+        flash("Final mark scaling disabled.")
+    else:
+        try:
+            payload["final_mark_max"] = float(raw_value)
+            flash(f"Final mark will be scaled out of {raw_value}.")
+        except ValueError:
+            flash(f"'{raw_value}' is not a valid number for the final mark scale.")
+            return redirect(url_for("admin_dashboard"))
+
+    metadata.write_metadata(ACTIVE_TEMPLATE_JSON_PATH, payload)
     return redirect(url_for("admin_dashboard"))
 
 
@@ -1970,6 +2192,46 @@ def admin_export_marking_students_columns_xlsx():
     )
 
 
+@app.route("/admin/submission/<int:submission_id>/report.pdf")
+@login_required
+def admin_submission_report_pdf(submission_id):
+    submission = db.get_submission(submission_id)
+    if not submission:
+        abort(404)
+
+    pdf_bytes, save_path = _generate_and_store_submission_report(submission)
+    return send_file(
+        BytesIO(pdf_bytes),
+        as_attachment=True,
+        download_name=save_path.name,
+        mimetype="application/pdf",
+    )
+
+
+@app.route("/admin/export/reports_all.zip")
+@login_required
+def admin_export_all_reports_zip():
+    include_excluded = request.args.get("include_excluded", "0").strip().lower() in {"1", "true", "yes"}
+    submissions = db.list_submissions(marking_filter="all" if include_excluded else "included")
+
+    zip_buffer = BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for summary in submissions:
+            submission = db.get_submission(summary["id"])
+            if not submission:
+                continue
+            pdf_bytes, save_path = _generate_and_store_submission_report(submission)
+            zf.writestr(save_path.name, pdf_bytes)
+    zip_buffer.seek(0)
+
+    return send_file(
+        zip_buffer,
+        as_attachment=True,
+        download_name="marking_reports.zip",
+        mimetype="application/zip",
+    )
+
+
 @app.route("/admin/submissions/delete-all", methods=["POST"])
 @login_required
 def admin_delete_all_submissions():
@@ -2201,6 +2463,42 @@ def admin_run_submission_analysis(submission_id):
 
     if return_to == "analysis":
         return redirect(url_for("admin_submission_analysis", submission_id=submission_id))
+
+    return redirect(
+        url_for(
+            "admin_dashboard",
+            q=search,
+            marking=marking_filter,
+            sort=sort_key,
+            dir=sort_dir,
+        )
+    )
+
+
+@app.route("/admin/submissions/reports/generate-all", methods=["POST"])
+@login_required
+def admin_generate_all_reports():
+    search = request.form.get("q", "").strip()
+    marking_filter = request.form.get("marking", "all").strip().lower()
+    sort_key = request.form.get("sort", "submitted_at").strip().lower()
+    sort_dir = request.form.get("dir", "desc").strip().lower()
+
+    generated_count = 0
+    failed_count = 0
+    for item in db.list_submissions(marking_filter="all"):
+        submission = db.get_submission(item["id"])
+        if not submission:
+            continue
+        try:
+            _generate_and_store_submission_report(submission)
+            generated_count += 1
+        except Exception:
+            failed_count += 1
+
+    if failed_count:
+        flash(f"Generated {generated_count} report(s), {failed_count} failed. Existing reports were overwritten.")
+    else:
+        flash(f"Generated {generated_count} report(s) for all submissions, overwriting any existing reports.")
 
     return redirect(
         url_for(
@@ -3125,6 +3423,36 @@ def admin_undo_marking_assessment(submission_id):
             view=view_mode if view_mode in {"student", "question"} else "student",
             question=selected_question or None,
             unmarked="1" if unmarked_only else None,
+            q=dashboard_search or None,
+            marking=dashboard_marking_filter,
+            sort=dashboard_sort_key,
+            dir=dashboard_sort_dir,
+        )
+    )
+
+
+@app.route("/admin/submission/<int:submission_id>/marking/general-comment", methods=["POST"])
+@login_required
+def admin_save_general_comment(submission_id):
+    submission = db.get_submission(submission_id)
+    if not submission:
+        abort(404)
+
+    comment = request.form.get("general_comment", "").strip()
+    db.save_general_comment(submission_id, comment)
+    flash("Saved general comment.")
+
+    view_mode = request.form.get("view", "student").strip().lower()
+    dashboard_search = request.form.get("q", "").strip()
+    dashboard_marking_filter = request.form.get("marking", "all").strip().lower()
+    dashboard_sort_key = request.form.get("sort", "submitted_at").strip().lower()
+    dashboard_sort_dir = request.form.get("dir", "desc").strip().lower()
+
+    return redirect(
+        url_for(
+            "admin_submission_marking",
+            submission_id=submission_id,
+            view=view_mode if view_mode in {"student", "question"} else "student",
             q=dashboard_search or None,
             marking=dashboard_marking_filter,
             sort=dashboard_sort_key,

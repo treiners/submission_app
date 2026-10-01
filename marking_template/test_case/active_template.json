@@ -172,5 +172,7 @@
       "notes_for_edge_cases": "Generated from marker template for Q9."
     }
   ],
-  "errors": []
+  "errors": [],
+  "total_max_score": 69.0,
+  "final_mark_max": 40.0
 }
